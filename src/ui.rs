@@ -188,6 +188,15 @@ pub trait FallbackHandler<CTX: Send + Sync>: Send + Sync {
 
 pub struct PrintFallback<CTX: Send + Sync>(pub String, PhantomData<CTX>);
 
+impl<CTX: Send + Sync> PrintFallback<CTX> {
+
+    #[inline]
+    pub fn new(msg: String) -> Self {
+        Self(msg, PhantomData)
+    }
+
+}
+
 impl<CTX: Send + Sync> FallbackHandler<CTX> for PrintFallback<CTX> {
     fn handle(&self, _: String, window: &Window<CTX>, _: &CTX) -> anyhow::Result<bool> {
         window.println(format!("{}", self.0).as_str());
