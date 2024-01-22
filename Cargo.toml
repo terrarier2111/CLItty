@@ -1,5 +1,5 @@
 [package]
-name = "CLItty"
+name = "clitty"
 version = "0.1.0"
 edition = "2021"
 
