@@ -1,4 +1,4 @@
-use crossterm::{QueueableCommand, terminal};
+use crossterm::{terminal, QueueableCommand};
 use std::collections::HashMap;
 use std::io::Write;
 use std::marker::PhantomData;
@@ -17,7 +17,6 @@ pub struct CmdLineInterface<CTX> {
 }
 
 impl<CTX> CmdLineInterface<CTX> {
-
     pub fn new(window: Window<CTX>) -> Self {
         Self {
             windows: RwLock::new(vec![Arc::new(window)]),
@@ -29,7 +28,12 @@ impl<CTX> CmdLineInterface<CTX> {
         let mut lock = std::io::stdout().lock();
         lock.queue(terminal::EnterAlternateScreen).unwrap();
         lock.flush().unwrap();
-        self.windows.read().unwrap().last().unwrap().reapply_prompt();
+        self.windows
+            .read()
+            .unwrap()
+            .last()
+            .unwrap()
+            .reapply_prompt();
     }
 
     pub fn pop_screen(&self, ctx: &CTX) -> Option<Arc<Window<CTX>>> {
@@ -85,11 +89,10 @@ impl<CTX> CmdLineInterface<CTX> {
                         drop(windows);
                         popped.handle_close(ctx);
                     }
-                },
+                }
             }
         }
     }
-
 }
 
 pub struct Cmds<'a, CTX>(RwLockReadGuard<'a, Vec<Arc<Window<CTX>>>>, &'a Window<CTX>);
@@ -125,22 +128,30 @@ impl<CTX> Window<CTX> {
         match self.core.process(ctx, input.as_str()) {
             Ok(_) => Some(Ok(true)),
             Err(err) => match err {
-                InputError::ArgumentCnt { name, expected, got } => {
-                    self.println(&format!("The command {} expects {} arguments but got {}", name, expected, got));
+                InputError::ArgumentCnt {
+                    name,
+                    expected,
+                    got,
+                } => {
+                    self.println(&format!(
+                        "The command {} expects {} arguments but got {}",
+                        name, expected, got
+                    ));
                     Some(Ok(false))
-                },
+                }
                 InputError::CommandNotFound { .. } => Some(self.fallback.handle(input, self, ctx)),
-                InputError::InputEmpty => {
-                    Some(Ok(false))
-                },
+                InputError::InputEmpty => Some(Ok(false)),
                 InputError::ExecError { name, error } => {
-                    self.println(&format!("An error occoured while executing the command \"{}\": {}", name, error));
+                    self.println(&format!(
+                        "An error occoured while executing the command \"{}\": {}",
+                        name, error
+                    ));
                     Some(Ok(false))
-                },
+                }
                 InputError::ParamInvalidError(error) => {
                     self.println(&format!("Wrong syntax: {}", error));
                     Some(Ok(false))
-                },
+                }
             },
         }
     }
@@ -169,7 +180,6 @@ impl<CTX> Window<CTX> {
     pub fn handle_close(&self, ctx: &CTX) {
         (&self.on_close)(ctx);
     }
-
 }
 
 pub trait FallbackHandler<CTX> {
@@ -223,9 +233,14 @@ impl<CTX> CLIBuilder<CTX> {
     }
 
     pub fn build(self) -> Window<CTX> {
-        let prompt = self.prompt.as_ref().map_or(String::new(), |prompt| format!("{}", prompt));
+        let prompt = self
+            .prompt
+            .as_ref()
+            .map_or(String::new(), |prompt| format!("{}", prompt));
         Window {
-            fallback: self.fallback.expect("a fallback has to be specified before a CLI can be built"),
+            fallback: self
+                .fallback
+                .expect("a fallback has to be specified before a CLI can be built"),
             term: StdioTerm::new(prompt, None, 10),
             core: CLICore::new(self.cmds),
             on_close: self.on_close.unwrap_or_else(|| Box::new(|_| {})),
@@ -234,9 +249,20 @@ impl<CTX> CLIBuilder<CTX> {
 }
 
 mod term {
-    use std::{collections::HashSet, sync::{Mutex, atomic::AtomicBool}, time::Duration, io::Write};
+    use std::{
+        collections::HashSet,
+        io::Write,
+        sync::{atomic::AtomicBool, Mutex},
+        time::Duration,
+    };
 
-    use crossterm::{QueueableCommand, style, cursor, event::{ poll, read, KeyModifiers }, terminal::{enable_raw_mode, self, disable_raw_mode}};
+    use crossterm::{
+        cursor,
+        event::{poll, read, KeyModifiers},
+        style,
+        terminal::{self, disable_raw_mode, enable_raw_mode},
+        QueueableCommand,
+    };
     use strip_ansi_escapes::strip_str;
 
     use super::{char_size, char_start};
@@ -265,20 +291,39 @@ mod term {
 
     fn ensure_raw() {
         static RAW_MODE: AtomicBool = AtomicBool::new(false);
-        if RAW_MODE.compare_exchange(false, true, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed).is_err() {
+        if RAW_MODE
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+            )
+            .is_err()
+        {
             return;
         }
         enable_raw_mode().unwrap();
     }
 
     impl StdioTerm {
-
         pub fn new(prompt: String, allowed_chars: Option<HashSet<char>>, hist_cap: usize) -> Self {
             ensure_raw();
             let truncated = strip_str(&prompt).chars().count();
             Self {
-                print: Mutex::new(PrintCtx { buffer: String::new(), prompt_len: truncated, prompt, cursor_idx: 0, whole_cursor_idx: 0 }),
-                read: Mutex::new(ReadCtx { history: Vec::with_capacity(hist_cap), allowed_chars, hist_idx: 0, insert_mode: true, interm_hist_buffer: String::new() }),
+                print: Mutex::new(PrintCtx {
+                    buffer: String::new(),
+                    prompt_len: truncated,
+                    prompt,
+                    cursor_idx: 0,
+                    whole_cursor_idx: 0,
+                }),
+                read: Mutex::new(ReadCtx {
+                    history: Vec::with_capacity(hist_cap),
+                    allowed_chars,
+                    hist_idx: 0,
+                    insert_mode: true,
+                    interm_hist_buffer: String::new(),
+                }),
                 reading: AtomicBool::new(false),
             }
         }
@@ -288,18 +333,27 @@ mod term {
             let mut print_ctx = self.print.lock().unwrap();
             print_ctx.prompt = prompt;
             print_ctx.prompt_len = truncated;
-            self.reapply_prompt_inner(&print_ctx.prompt, &print_ctx.buffer, print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16);
+            self.reapply_prompt_inner(
+                &print_ctx.prompt,
+                &print_ctx.buffer,
+                print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16,
+            );
         }
 
         pub fn reapply_prompt(&self) {
             let print_ctx = self.print.lock().unwrap();
-            self.reapply_prompt_inner(&print_ctx.prompt, &print_ctx.buffer, print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16);
+            self.reapply_prompt_inner(
+                &print_ctx.prompt,
+                &print_ctx.buffer,
+                print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16,
+            );
         }
 
         fn reapply_prompt_inner(&self, prompt: &String, buffer: &String, column: u16) {
             let mut lock = std::io::stdout().lock();
             lock.queue(cursor::MoveToColumn(0)).unwrap();
-            lock.queue(terminal::Clear(terminal::ClearType::UntilNewLine)).unwrap();
+            lock.queue(terminal::Clear(terminal::ClearType::UntilNewLine))
+                .unwrap();
             lock.queue(cursor::MoveToColumn(0)).unwrap();
             lock.queue(style::Print(prompt)).unwrap();
             lock.queue(style::Print(buffer)).unwrap();
@@ -310,23 +364,23 @@ mod term {
         fn println_inner<const ALIGNED: bool>(&self, val: &str) {
             let input = val.split('\n');
             let print_ctx = self.print.lock().unwrap();
-            let offset = if ALIGNED {
-                print_ctx.prompt_len
-            } else {
-                0
-            };
+            let offset = if ALIGNED { print_ctx.prompt_len } else { 0 };
             let mut lock = std::io::stdout().lock();
             for part in input {
                 lock.queue(cursor::MoveToColumn(offset as u16)).unwrap();
                 lock.queue(style::Print(part)).unwrap();
-                lock.queue(terminal::Clear(terminal::ClearType::UntilNewLine)).unwrap();
+                lock.queue(terminal::Clear(terminal::ClearType::UntilNewLine))
+                    .unwrap();
                 lock.queue(terminal::ScrollUp(1)).unwrap();
             }
             if self.reading.load(std::sync::atomic::Ordering::Acquire) {
                 lock.queue(cursor::MoveToColumn(0)).unwrap();
                 lock.queue(style::Print(&print_ctx.prompt)).unwrap();
                 lock.queue(style::Print(&print_ctx.buffer)).unwrap();
-                lock.queue(cursor::MoveToColumn(print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16)).unwrap();
+                lock.queue(cursor::MoveToColumn(
+                    print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16,
+                ))
+                .unwrap();
                 lock.flush().unwrap();
             }
         }
@@ -341,35 +395,47 @@ mod term {
 
         pub fn read_line_prompt(&self, can_leave: bool) -> Option<String> {
             let mut read_ctx = self.read.lock().unwrap();
-            self.reading.store(true, std::sync::atomic::Ordering::Release);
+            self.reading
+                .store(true, std::sync::atomic::Ordering::Release);
             self.reapply_prompt();
             let ret = 'ret: loop {
                 if poll(Duration::MAX).unwrap() {
                     match read().unwrap() {
-                        crossterm::event::Event::FocusGained => {},
-                        crossterm::event::Event::FocusLost => {},
+                        crossterm::event::Event::FocusGained => {}
+                        crossterm::event::Event::FocusLost => {}
                         crossterm::event::Event::Key(ev) => {
                             match ev.kind {
-                                crossterm::event::KeyEventKind::Press | crossterm::event::KeyEventKind::Repeat => {
+                                crossterm::event::KeyEventKind::Press
+                                | crossterm::event::KeyEventKind::Repeat => {
                                     let mut print_ctx = self.print.lock().unwrap();
                                     match ev.code {
                                         crossterm::event::KeyCode::Backspace => {
                                             if print_ctx.cursor_idx != 0 {
                                                 let cursor = print_ctx.cursor_idx;
-                                                let cursor = char_start(&print_ctx.buffer, cursor - 1);
-                                                let size = char_size(print_ctx.buffer.as_bytes()[cursor as usize] as char);
+                                                let cursor =
+                                                    char_start(&print_ctx.buffer, cursor - 1);
+                                                let size = char_size(
+                                                    print_ctx.buffer.as_bytes()[cursor as usize]
+                                                        as char,
+                                                );
                                                 print_ctx.buffer.remove(cursor);
                                                 print_ctx.cursor_idx -= size;
                                                 print_ctx.whole_cursor_idx -= 1;
                                                 let mut lock = std::io::stdout().lock();
                                                 lock.queue(cursor::MoveToColumn(0)).unwrap();
-                                                lock.queue(style::Print(&print_ctx.prompt)).unwrap();
-                                                lock.queue(style::Print(&print_ctx.buffer)).unwrap();
+                                                lock.queue(style::Print(&print_ctx.prompt))
+                                                    .unwrap();
+                                                lock.queue(style::Print(&print_ctx.buffer))
+                                                    .unwrap();
                                                 lock.queue(style::Print(" ")).unwrap();
-                                                lock.queue(cursor::MoveToColumn(print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16)).unwrap();
+                                                lock.queue(cursor::MoveToColumn(
+                                                    print_ctx.prompt_len as u16
+                                                        + print_ctx.whole_cursor_idx as u16,
+                                                ))
+                                                .unwrap();
                                                 lock.flush().unwrap();
                                             }
-                                        },
+                                        }
                                         crossterm::event::KeyCode::Enter => {
                                             let mut lock = std::io::stdout().lock();
                                             lock.queue(terminal::ScrollUp(1)).unwrap();
@@ -383,61 +449,85 @@ mod term {
                                             // add to history
                                             if !print_ctx.buffer.is_empty() {
                                                 if read_ctx.hist_idx == 0 {
-                                                    if read_ctx.history.capacity() != 0 && read_ctx.history.len() == read_ctx.history.capacity() {
+                                                    if read_ctx.history.capacity() != 0
+                                                        && read_ctx.history.len()
+                                                            == read_ctx.history.capacity()
+                                                    {
                                                         read_ctx.history.remove(0);
                                                     }
                                                     read_ctx.history.push(print_ctx.buffer.clone());
                                                 } else {
                                                     let hist_len = read_ctx.history.len();
                                                     let hist_idx = read_ctx.hist_idx;
-                                                    read_ctx.history[hist_len - hist_idx] = print_ctx.buffer.clone();
+                                                    read_ctx.history[hist_len - hist_idx] =
+                                                        print_ctx.buffer.clone();
                                                     read_ctx.hist_idx = 0;
                                                 }
                                             }
 
-                                            let ret = core::mem::replace(&mut print_ctx.buffer, String::new());
+                                            let ret = core::mem::replace(
+                                                &mut print_ctx.buffer,
+                                                String::new(),
+                                            );
                                             break 'ret Some(ret);
-                                        },
+                                        }
                                         crossterm::event::KeyCode::Left => {
                                             if print_ctx.cursor_idx == 0 {
                                                 continue;
                                             }
-                                            let size = char_size(print_ctx.buffer.as_bytes()[print_ctx.cursor_idx as usize - 1] as char);
+                                            let size = char_size(
+                                                print_ctx.buffer.as_bytes()
+                                                    [print_ctx.cursor_idx as usize - 1]
+                                                    as char,
+                                            );
                                             print_ctx.cursor_idx -= size;
                                             print_ctx.whole_cursor_idx -= 1;
                                             std::io::stdout().queue(cursor::MoveLeft(1)).unwrap();
                                             std::io::stdout().flush().unwrap();
-                                        },
+                                        }
                                         crossterm::event::KeyCode::Right => {
                                             if print_ctx.buffer.len() == print_ctx.cursor_idx {
                                                 continue;
                                             }
-                                            let size = char_size(print_ctx.buffer.as_bytes()[print_ctx.cursor_idx as usize] as char);
+                                            let size = char_size(
+                                                print_ctx.buffer.as_bytes()
+                                                    [print_ctx.cursor_idx as usize]
+                                                    as char,
+                                            );
                                             print_ctx.cursor_idx += size;
                                             print_ctx.whole_cursor_idx += 1;
                                             std::io::stdout().queue(cursor::MoveRight(1)).unwrap();
                                             std::io::stdout().flush().unwrap();
-                                        },
+                                        }
                                         crossterm::event::KeyCode::Up => {
                                             if read_ctx.hist_idx == read_ctx.history.len() {
                                                 continue;
                                             }
                                             let buf_len = print_ctx.buffer.len();
                                             read_ctx.hist_idx += 1;
-                                            let prev = core::mem::replace(&mut print_ctx.buffer, read_ctx.history[read_ctx.history.len() - read_ctx.hist_idx].clone());
+                                            let prev = core::mem::replace(
+                                                &mut print_ctx.buffer,
+                                                read_ctx.history
+                                                    [read_ctx.history.len() - read_ctx.hist_idx]
+                                                    .clone(),
+                                            );
                                             if read_ctx.hist_idx == 1 {
                                                 read_ctx.interm_hist_buffer = prev;
                                             }
                                             print_ctx.cursor_idx = print_ctx.buffer.len();
-                                            print_ctx.whole_cursor_idx = print_ctx.buffer.chars().count();
+                                            print_ctx.whole_cursor_idx =
+                                                print_ctx.buffer.chars().count();
                                             let mut lock = std::io::stdout().lock();
                                             lock.queue(cursor::MoveToColumn(0)).unwrap();
-                                            lock.queue(style::Print(" ".repeat(print_ctx.prompt_len + buf_len))).unwrap();
+                                            lock.queue(style::Print(
+                                                " ".repeat(print_ctx.prompt_len + buf_len),
+                                            ))
+                                            .unwrap();
                                             lock.queue(cursor::MoveToColumn(0)).unwrap();
                                             lock.queue(style::Print(&print_ctx.prompt)).unwrap();
                                             lock.queue(style::Print(&print_ctx.buffer)).unwrap();
                                             lock.flush().unwrap();
-                                        },
+                                        }
                                         crossterm::event::KeyCode::Down => {
                                             if read_ctx.hist_idx == 0 {
                                                 continue;
@@ -445,26 +535,35 @@ mod term {
                                             let buf_len = print_ctx.buffer.len();
                                             read_ctx.hist_idx -= 1;
                                             if read_ctx.hist_idx != 0 {
-                                                print_ctx.buffer = read_ctx.history[read_ctx.history.len() - read_ctx.hist_idx].clone();
+                                                print_ctx.buffer = read_ctx.history
+                                                    [read_ctx.history.len() - read_ctx.hist_idx]
+                                                    .clone();
                                             } else {
-                                                print_ctx.buffer = core::mem::replace(&mut read_ctx.interm_hist_buffer, String::new());
+                                                print_ctx.buffer = core::mem::replace(
+                                                    &mut read_ctx.interm_hist_buffer,
+                                                    String::new(),
+                                                );
                                             }
                                             print_ctx.cursor_idx = print_ctx.buffer.len();
-                                            print_ctx.whole_cursor_idx = print_ctx.buffer.chars().count();
+                                            print_ctx.whole_cursor_idx =
+                                                print_ctx.buffer.chars().count();
                                             let mut lock = std::io::stdout().lock();
                                             lock.queue(cursor::MoveToColumn(0)).unwrap();
-                                            lock.queue(style::Print(" ".repeat(print_ctx.prompt_len + buf_len))).unwrap();
+                                            lock.queue(style::Print(
+                                                " ".repeat(print_ctx.prompt_len + buf_len),
+                                            ))
+                                            .unwrap();
                                             lock.queue(cursor::MoveToColumn(0)).unwrap();
                                             lock.queue(style::Print(&print_ctx.prompt)).unwrap();
                                             lock.queue(style::Print(&print_ctx.buffer)).unwrap();
                                             lock.flush().unwrap();
-                                        },
-                                        crossterm::event::KeyCode::Home => {},
-                                        crossterm::event::KeyCode::End => {},
-                                        crossterm::event::KeyCode::PageUp => {},
-                                        crossterm::event::KeyCode::PageDown => {},
-                                        crossterm::event::KeyCode::Tab => {},
-                                        crossterm::event::KeyCode::BackTab => {},
+                                        }
+                                        crossterm::event::KeyCode::Home => {}
+                                        crossterm::event::KeyCode::End => {}
+                                        crossterm::event::KeyCode::PageUp => {}
+                                        crossterm::event::KeyCode::PageDown => {}
+                                        crossterm::event::KeyCode::Tab => {}
+                                        crossterm::event::KeyCode::BackTab => {}
                                         crossterm::event::KeyCode::Delete => {
                                             if print_ctx.cursor_idx == print_ctx.buffer.len() {
                                                 continue;
@@ -477,18 +576,25 @@ mod term {
                                             lock.queue(style::Print(&print_ctx.prompt)).unwrap();
                                             lock.queue(style::Print(&print_ctx.buffer)).unwrap();
                                             lock.queue(style::Print(" ")).unwrap();
-                                            lock.queue(cursor::MoveToColumn(print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16)).unwrap();
+                                            lock.queue(cursor::MoveToColumn(
+                                                print_ctx.prompt_len as u16
+                                                    + print_ctx.whole_cursor_idx as u16,
+                                            ))
+                                            .unwrap();
                                             lock.flush().unwrap();
-                                        },
+                                        }
                                         crossterm::event::KeyCode::Insert => {
                                             read_ctx.insert_mode = !read_ctx.insert_mode;
-                                        },
-                                        crossterm::event::KeyCode::F(_) => {},
+                                        }
+                                        crossterm::event::KeyCode::F(_) => {}
                                         crossterm::event::KeyCode::Char(chr) => {
-                                            if chr == 'c' && ev.modifiers.contains(KeyModifiers::CONTROL) {
+                                            if chr == 'c'
+                                                && ev.modifiers.contains(KeyModifiers::CONTROL)
+                                            {
                                                 let mut lock = std::io::stdout().lock();
                                                 if can_leave {
-                                                    lock.queue(terminal::LeaveAlternateScreen).unwrap();
+                                                    lock.queue(terminal::LeaveAlternateScreen)
+                                                        .unwrap();
                                                 }
                                                 lock.queue(terminal::ScrollUp(1)).unwrap();
                                                 lock.queue(cursor::MoveToColumn(0)).unwrap();
@@ -496,14 +602,18 @@ mod term {
                                                 disable_raw_mode().unwrap();
                                                 std::process::exit(0);
                                             }
-                                            if let Some(allowed_chars) = read_ctx.allowed_chars.as_ref() {
+                                            if let Some(allowed_chars) =
+                                                read_ctx.allowed_chars.as_ref()
+                                            {
                                                 if !allowed_chars.contains(&chr) {
                                                     // character not allowed
                                                     continue;
                                                 }
                                             }
                                             let cursor = print_ctx.cursor_idx;
-                                            if !read_ctx.insert_mode && print_ctx.cursor_idx != print_ctx.buffer.len() {
+                                            if !read_ctx.insert_mode
+                                                && print_ctx.cursor_idx != print_ctx.buffer.len()
+                                            {
                                                 print_ctx.buffer.remove(cursor);
                                             }
                                             print_ctx.buffer.insert(cursor, chr);
@@ -513,10 +623,14 @@ mod term {
                                             lock.queue(cursor::MoveToColumn(0)).unwrap();
                                             lock.queue(style::Print(&print_ctx.prompt)).unwrap();
                                             lock.queue(style::Print(&print_ctx.buffer)).unwrap();
-                                            lock.queue(cursor::MoveToColumn(print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16)).unwrap();
+                                            lock.queue(cursor::MoveToColumn(
+                                                print_ctx.prompt_len as u16
+                                                    + print_ctx.whole_cursor_idx as u16,
+                                            ))
+                                            .unwrap();
                                             lock.flush().unwrap();
-                                        },
-                                        crossterm::event::KeyCode::Null => {},
+                                        }
+                                        crossterm::event::KeyCode::Null => {}
                                         crossterm::event::KeyCode::Esc => {
                                             // only leave the screen if we can actually do so
                                             if can_leave {
@@ -526,22 +640,22 @@ mod term {
                                                 lock.flush().unwrap();
                                                 return None;
                                             }
-                                        },
-                                        crossterm::event::KeyCode::CapsLock => {},
-                                        crossterm::event::KeyCode::ScrollLock => {},
-                                        crossterm::event::KeyCode::NumLock => {},
-                                        crossterm::event::KeyCode::PrintScreen => {},
-                                        crossterm::event::KeyCode::Pause => {},
-                                        crossterm::event::KeyCode::Menu => {},
-                                        crossterm::event::KeyCode::KeypadBegin => {},
-                                        crossterm::event::KeyCode::Media(_) => {},
-                                        crossterm::event::KeyCode::Modifier(_) => {},
+                                        }
+                                        crossterm::event::KeyCode::CapsLock => {}
+                                        crossterm::event::KeyCode::ScrollLock => {}
+                                        crossterm::event::KeyCode::NumLock => {}
+                                        crossterm::event::KeyCode::PrintScreen => {}
+                                        crossterm::event::KeyCode::Pause => {}
+                                        crossterm::event::KeyCode::Menu => {}
+                                        crossterm::event::KeyCode::KeypadBegin => {}
+                                        crossterm::event::KeyCode::Media(_) => {}
+                                        crossterm::event::KeyCode::Modifier(_) => {}
                                     }
-                                },
-                                crossterm::event::KeyEventKind::Release => {},
+                                }
+                                crossterm::event::KeyEventKind::Release => {}
                             }
-                        },
-                        crossterm::event::Event::Mouse(_) => {},
+                        }
+                        crossterm::event::Event::Mouse(_) => {}
                         crossterm::event::Event::Paste(paste) => {
                             let mut print_ctx = self.print.lock().unwrap();
                             let mut lock = std::io::stdout().lock();
@@ -552,19 +666,21 @@ mod term {
                             lock.queue(cursor::MoveToColumn(0)).unwrap();
                             lock.queue(style::Print(&print_ctx.prompt)).unwrap();
                             lock.queue(style::Print(&print_ctx.buffer)).unwrap();
-                            lock.queue(cursor::MoveToColumn(print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16)).unwrap();
+                            lock.queue(cursor::MoveToColumn(
+                                print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16,
+                            ))
+                            .unwrap();
                             lock.flush().unwrap();
-                        },
-                        crossterm::event::Event::Resize(_, _) => {},
+                        }
+                        crossterm::event::Event::Resize(_, _) => {}
                     }
                 }
             };
-            self.reading.store(false, std::sync::atomic::Ordering::Release);
+            self.reading
+                .store(false, std::sync::atomic::Ordering::Release);
             ret
         }
-
     }
-
 }
 
 #[inline]
