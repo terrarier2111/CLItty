@@ -12,11 +12,11 @@ use self::term::StdioTerm;
 
 // FIXME: maybe add tab completion
 
-pub struct CmdLineInterface<CTX> {
+pub struct CmdLineInterface<CTX: Send + Sync> {
     windows: RwLock<Vec<Arc<Window<CTX>>>>,
 }
 
-impl<CTX> CmdLineInterface<CTX> {
+impl<CTX: Send + Sync> CmdLineInterface<CTX> {
     pub fn new(window: Window<CTX>) -> Self {
         Self {
             windows: RwLock::new(vec![Arc::new(window)]),
@@ -95,9 +95,9 @@ impl<CTX> CmdLineInterface<CTX> {
     }
 }
 
-pub struct Cmds<'a, CTX>(RwLockReadGuard<'a, Vec<Arc<Window<CTX>>>>, &'a Window<CTX>);
+pub struct Cmds<'a, CTX: Send + Sync>(RwLockReadGuard<'a, Vec<Arc<Window<CTX>>>>, &'a Window<CTX>);
 
-impl<'a, CTX> Deref for Cmds<'a, CTX> {
+impl<'a, CTX: Send + Sync> Deref for Cmds<'a, CTX> {
     type Target = HashMap<String, Command<CTX>>;
 
     #[inline]
@@ -106,14 +106,14 @@ impl<'a, CTX> Deref for Cmds<'a, CTX> {
     }
 }
 
-pub struct Window<CTX> {
+pub struct Window<CTX: Send + Sync> {
     core: CLICore<CTX>,
     fallback: Box<dyn FallbackHandler<CTX>>,
     term: StdioTerm,
-    on_close: Box<dyn Fn(&CTX)>,
+    on_close: Box<dyn Fn(&CTX) + Send + Sync>,
 }
 
-impl<CTX> Window<CTX> {
+impl<CTX: Send + Sync> Window<CTX> {
     pub fn new(builder: CLIBuilder<CTX>) -> Self {
         builder.build()
     }
@@ -182,27 +182,27 @@ impl<CTX> Window<CTX> {
     }
 }
 
-pub trait FallbackHandler<CTX> {
+pub trait FallbackHandler<CTX: Send + Sync>: Send + Sync {
     fn handle(&self, input: String, window: &Window<CTX>, ctx: &CTX) -> anyhow::Result<bool>;
 }
 
-pub struct PrintFallback<CTX>(pub String, PhantomData<CTX>);
+pub struct PrintFallback<CTX: Send + Sync>(pub String, PhantomData<CTX>);
 
-impl<CTX> FallbackHandler<CTX> for PrintFallback<CTX> {
+impl<CTX: Send + Sync> FallbackHandler<CTX> for PrintFallback<CTX> {
     fn handle(&self, _: String, window: &Window<CTX>, _: &CTX) -> anyhow::Result<bool> {
         window.println(format!("{}", self.0).as_str());
         Ok(false)
     }
 }
 
-pub struct CLIBuilder<CTX> {
+pub struct CLIBuilder<CTX: Send + Sync> {
     cmds: Vec<CommandBuilder<CTX>>,
     prompt: Option<String>,
     fallback: Option<Box<dyn FallbackHandler<CTX>>>,
-    on_close: Option<Box<dyn Fn(&CTX)>>,
+    on_close: Option<Box<dyn Fn(&CTX) + Send + Sync>>,
 }
 
-impl<CTX> CLIBuilder<CTX> {
+impl<CTX: Send + Sync> CLIBuilder<CTX> {
     pub fn new() -> Self {
         Self {
             cmds: vec![],
@@ -227,7 +227,7 @@ impl<CTX> CLIBuilder<CTX> {
         self
     }
 
-    pub fn on_close(mut self, on_close: Box<dyn Fn(&CTX)>) -> Self {
+    pub fn on_close(mut self, on_close: Box<dyn Fn(&CTX) + Send + Sync>) -> Self {
         self.on_close = Some(on_close);
         self
     }
