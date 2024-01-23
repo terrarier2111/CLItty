@@ -189,12 +189,10 @@ pub trait FallbackHandler<CTX: Send + Sync>: Send + Sync {
 pub struct PrintFallback<CTX: Send + Sync>(pub String, PhantomData<CTX>);
 
 impl<CTX: Send + Sync> PrintFallback<CTX> {
-
     #[inline]
     pub fn new(msg: String) -> Self {
         Self(msg, PhantomData)
     }
-
 }
 
 impl<CTX: Send + Sync> FallbackHandler<CTX> for PrintFallback<CTX> {
@@ -212,7 +210,7 @@ pub struct CLIBuilder<CTX: Send + Sync> {
 }
 
 impl<CTX: Send + Sync> CLIBuilder<CTX> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             cmds: vec![],
             prompt: None,

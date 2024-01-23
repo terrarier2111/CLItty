@@ -205,6 +205,7 @@ impl<C> CommandBuilder<C> {
     }
 }
 
+#[derive(Clone)]
 pub struct CommandParam {
     pub name: &'static str,
     pub ty: CommandParamTy,
@@ -216,6 +217,7 @@ impl CommandParam {
     }
 }
 
+#[derive(Clone)]
 pub enum CommandParamTy {
     Int(CmdParamNumConstraints<usize>),
     Decimal(CmdParamDecimalConstraints<f64>),
@@ -328,7 +330,7 @@ impl CommandParamTy {
                         Err(ParamInvalidError {
                             name: param_name.to_string(),
                             kind: ParamInvalidErrorKind::EnumInvalidVariant(
-                                variants,
+                                variants.clone(),
                                 input.to_string(),
                             ),
                         })
@@ -341,7 +343,7 @@ impl CommandParamTy {
                         Err(ParamInvalidError {
                             name: param_name.to_string(),
                             kind: ParamInvalidErrorKind::EnumInvalidVariant(
-                                variants,
+                                variants.clone(),
                                 input.to_string(),
                             ),
                         })
@@ -542,7 +544,7 @@ impl Debug for ParamInvalidError {
 pub enum ParamInvalidErrorKind {
     StringInvalidLen(Range<usize>, usize),
     StringInvalidVariant(&'static [&'static str], String),
-    EnumInvalidVariant(&'static [(&'static str, EnumVal)], String),
+    EnumInvalidVariant(Vec<(&'static str, EnumVal)>, String),
     NoNum(String),
     IntOOB(Range<usize>, usize),
     IntInvalidVariant(&'static [usize], usize),
@@ -550,23 +552,27 @@ pub enum ParamInvalidErrorKind {
     DecimalOOB(Range<f64>, f64),
 }
 
+#[derive(Clone)]
 pub enum EnumVal {
     Simple(CommandParamTy),
     Complex(UsageSubBuilder<BuilderMutable>),
     None,
 }
 
+#[derive(Clone)]
 pub enum CmdParamNumConstraints<T: 'static> {
     Range(Range<T>),
     Variants(&'static [T]),
     None,
 }
 
+#[derive(Clone)]
 pub enum CmdParamDecimalConstraints<T> {
     Range(Range<T>),
     None,
 }
 
+#[derive(Clone)]
 pub enum CmdParamStrConstraints {
     Range(Range<usize>),
     Variants {
@@ -576,14 +582,15 @@ pub enum CmdParamStrConstraints {
     None,
 }
 
+#[derive(Clone)]
 pub enum CmdParamEnumConstraints {
-    IgnoreCase(&'static [(&'static str, EnumVal)]),
-    Exact(&'static [(&'static str, EnumVal)]),
+    IgnoreCase(Vec<(&'static str, EnumVal)>),
+    Exact(Vec<(&'static str, EnumVal)>),
 }
 
 impl CmdParamEnumConstraints {
     #[inline]
-    fn values(&self) -> &'static [(&'static str, EnumVal)] {
+    fn values(&self) -> &Vec<(&'static str, EnumVal)> {
         match self {
             CmdParamEnumConstraints::IgnoreCase(values) => values,
             CmdParamEnumConstraints::Exact(values) => values,
@@ -591,7 +598,9 @@ impl CmdParamEnumConstraints {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct BuilderMutable;
+#[derive(Clone, Copy)]
 pub struct BuilderImmutable;
 
 struct InnerBuilder {
@@ -607,7 +616,7 @@ pub struct UsageBuilder<M = BuilderMutable> {
 }
 
 impl<'a> UsageBuilder<BuilderMutable> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             inner: InnerBuilder {
                 prefix: None,
@@ -615,7 +624,7 @@ impl<'a> UsageBuilder<BuilderMutable> {
                 opt: vec![],
                 opt_prefixed: vec![],
             },
-            mutability: Default::default(),
+            mutability: PhantomData,
         }
     }
 
@@ -648,7 +657,7 @@ impl<'a> UsageBuilder<BuilderMutable> {
     fn finish(self) -> UsageBuilder<BuilderImmutable> {
         UsageBuilder {
             inner: self.inner,
-            mutability: Default::default(),
+            mutability: PhantomData,
         }
     }
 }
@@ -675,26 +684,28 @@ impl UsageBuilder<BuilderImmutable> {
     }
 }
 
+#[derive(Clone)]
 struct InnerSubBuilder {
     prefix: Option<String>,
     req: Vec<CommandParam>,
     opt_prefixed: Vec<CommandParam>,
 }
 
+#[derive(Clone)]
 pub struct UsageSubBuilder<M = BuilderMutable> {
     inner: InnerSubBuilder,
     mutability: PhantomData<M>,
 }
 
 impl<'a> UsageSubBuilder<BuilderMutable> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             inner: InnerSubBuilder {
                 prefix: None,
                 req: vec![],
                 opt_prefixed: vec![],
             },
-            mutability: Default::default(),
+            mutability: PhantomData,
         }
     }
 
@@ -719,17 +730,17 @@ impl<'a> UsageSubBuilder<BuilderMutable> {
 
 impl UsageSubBuilder<BuilderImmutable> {
     #[inline(always)]
-    pub fn optional_prefixed_prefix(&self) -> &Option<String> {
+    pub const fn optional_prefixed_prefix(&self) -> &Option<String> {
         &self.inner.prefix
     }
 
     #[inline(always)]
-    pub fn required(&self) -> &Vec<CommandParam> {
+    pub const fn required(&self) -> &Vec<CommandParam> {
         &self.inner.req
     }
 
     #[inline(always)]
-    pub fn optional_prefixed(&self) -> &Vec<CommandParam> {
+    pub const fn optional_prefixed(&self) -> &Vec<CommandParam> {
         &self.inner.opt_prefixed
     }
 }
