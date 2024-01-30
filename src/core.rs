@@ -403,8 +403,8 @@ impl CommandParamTy {
                 }
             },
             CommandParamTy::Enum(variants) => {
-                let mut finished = String::from("variants:\r\n");
-                for variant in variants.values().iter() {
+                let mut finished = String::from("variants:\n");
+                /*for variant in variants.values().iter() {
                     finished.push_str(" ".repeat(indents).as_str());
                     finished.push_str("- \"");
                     finished.push_str(variant.0);
@@ -422,8 +422,8 @@ impl CommandParamTy {
                             finished.push('\"');
                         }
                     }
-                    finished.push_str("\r\n");
-                }
+                    finished.push_str("\n");
+                }*/
                 if !variants.values().is_empty() {
                     finished.push_str(" ".repeat(indents).as_str());
                 }
