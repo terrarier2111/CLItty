@@ -369,7 +369,7 @@ mod term {
         }
 
         fn println_inner<const ALIGNED: bool>(&self, val: &str) {
-            let input = val.split('\n');
+            let input = val.split("\r\n").map(|part| part.split('\n')).flatten();
             let print_ctx = self.print.lock().unwrap();
             let offset = if ALIGNED { print_ctx.prompt_len } else { 0 };
             let mut lock = std::io::stdout().lock();
