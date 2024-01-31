@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -55,8 +56,19 @@ impl<C> CLICore<C> {
                 }
                 if let Some(params) = &cmd.params {
                     let mut iter = parts.iter();
-                    for req in params.required() {
-                        req.ty.validate(iter.next().unwrap(), req.name)?;
+                    let overall_len = parts.len();
+                    for req in params.required().iter() {
+                        match &req.ty {
+                            CommandParamTy::Unbound { minimum, param } => {
+                                if iter.len() < minimum.get() {
+                                    return Err(InputError::ArgumentCnt { name: raw_cmd.clone(), expected: params.required().len() - 1 + minimum.get(), got: overall_len });
+                                }
+                                for param_val in iter.clone() {
+                                    param.validate(param_val, req.name)?;
+                                }
+                            },
+                            _ => req.ty.validate(iter.next().unwrap(), req.name)?,
+                        }
                     }
                 }
                 match cmd.cmd_impl.execute(ctx, &parts) {
@@ -223,6 +235,10 @@ pub enum CommandParamTy {
     Decimal(CmdParamDecimalConstraints<f64>),
     String(CmdParamStrConstraints),
     Enum(CmdParamEnumConstraints),
+    Unbound {
+        minimum: NonZeroUsize,
+        param: Box<CommandParamTy>,
+    },
 }
 
 impl CommandParamTy {
@@ -352,6 +368,7 @@ impl CommandParamTy {
                     }
                 }
             },
+            CommandParamTy::Unbound { .. } => unreachable!("Unbound should have been checked for previously"),
         }
     }
 
@@ -423,14 +440,23 @@ impl CommandParamTy {
                         }
                     }
                     finished.push_str("\n");
-                }
+                }   
                 if !variants.values().is_empty() {
                     finished.push_str(" ".repeat(indents).as_str());
                 }
                 finished
             }
+            CommandParamTy::Unbound { minimum, param } => {
+                let mut finished = String::from(" ".repeat(indents));
+                finished.push('[');
+                finished.push_str(minimum.to_string().as_str());
+                finished.push_str("...] "); // FIXME: is there a better visual representation?
+                finished.push_str(&param.to_string(indents));
+                finished
+            },
         }
     }
+
 }
 
 pub struct ParamInvalidError {
@@ -555,7 +581,7 @@ pub enum ParamInvalidErrorKind {
 #[derive(Clone)]
 pub enum EnumVal {
     Simple(CommandParamTy),
-    Complex(UsageSubBuilder<BuilderMutable>),
+    Complex(UsageSubBuilder<BuilderMutable>), // FIXME: replace this with a normal UsageBuilder if possible to allow for optional arguments
     None,
 }
 
@@ -637,11 +663,21 @@ impl<'a> UsageBuilder<BuilderMutable> {
         if !self.inner.opt.is_empty() {
             panic!("you can only append required parameters before any optional parameters get appended");
         }
+        if matches!(self.inner.req.last(), Some(CommandParam { ty: CommandParamTy::Unbound { .. }, .. })) {
+            panic!("you can't append parameters after unbound parameters");
+        }
         self.inner.req.push(param);
         self
     }
 
     pub fn optional(mut self, param: CommandParam) -> Self {
+        if matches!(self.inner.req.last(), Some(CommandParam { ty: CommandParamTy::Unbound { .. }, .. })) {
+            panic!("you can't append parameters after unbound parameters");
+        }
+        if matches!(self.inner.req.last(), Some(CommandParam { ty: CommandParamTy::Unbound { .. }, .. })) ||
+        matches!(self.inner.opt.last(), Some(CommandParam { ty: CommandParamTy::Unbound { .. }, .. })) {
+            panic!("you can't append parameters after unbound parameters");
+        }
         self.inner.opt.push(param);
         self
     }
