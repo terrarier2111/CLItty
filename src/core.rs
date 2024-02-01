@@ -23,7 +23,7 @@ impl<C> CLICore<C> {
     }
 
     pub fn process(&self, ctx: &C, input: &str) -> Result<(), InputError> {
-        let mut parts = input.split(" ").collect::<Vec<_>>();
+        let mut parts = input.split(' ').collect::<Vec<_>>();
         if parts.is_empty() {
             return Err(InputError::InputEmpty);
         }
@@ -31,18 +31,7 @@ impl<C> CLICore<C> {
         match self.cmds.get(&raw_cmd) {
             None => Err(InputError::CommandNotFound { name: raw_cmd }),
             Some(cmd) => {
-                let (expected_min, expected_max) = cmd
-                    .params
-                    .as_ref()
-                    .map(|all| {
-                        (
-                            all.inner.req.len(),
-                            all.inner.req.len()
-                                + all.inner.opt.len()
-                                + all.inner.opt_prefixed.len(),
-                        )
-                    })
-                    .unwrap_or((0, 0));
+                let (expected_min, expected_max) = (cmd.param_bounds.start, cmd.param_bounds.end);
                 if expected_min > parts.len() || expected_max < parts.len() {
                     return Err(InputError::ArgumentCnt {
                         name: raw_cmd,
@@ -138,6 +127,7 @@ pub struct Command<C> {
     params: Option<UsageBuilder<BuilderImmutable>>,
     aliases: Vec<String>, // FIXME: support this!
     cmd_impl: Box<dyn CommandImpl<CTX = C>>,
+    param_bounds: Range<usize>,
 }
 
 impl<C> Command<C> {
@@ -207,12 +197,33 @@ impl<C> CommandBuilder<C> {
     }
 
     fn build(self) -> Command<C> {
+        let param_bounds = {
+            match &self.params {
+                Some(usage) => {
+                    let mut min = usage.inner.req.len() + usage.inner.opt.len() + usage.inner.opt_prefixed.len();
+                    let mut max = min;
+                    let params = [usage.inner.req.last(), usage.inner.opt.last(), usage.inner.opt_prefixed.last()];
+                    for param in params {
+                        if let Some(param) = param {
+                            if let CommandParamTy::Unbound { minimum, .. } = &param.ty {
+                                min = min - 1 + minimum.get();
+                                max = usize::MAX;
+                                break;
+                            }
+                        }
+                    }
+                    min..max
+                },
+                None => 0..0,
+            }
+        };
         Command {
             name: self.name,
             desc: self.desc,
             params: self.params,
             aliases: self.aliases,
             cmd_impl: self.cmd_impl,
+            param_bounds,
         }
     }
 }
