@@ -229,13 +229,24 @@ impl<CTX: Send + Sync> CLIBuilder<CTX> {
                         panic!("There is already a command named {}", cmd.1.name);
                     }
                     if other.1.aliases.iter().any(|alias| alias == &cmd.1.name) {
-                        panic!("\"{}\" already has \"{}\" as an alias, so it can't be a command name", other.1.name, cmd.1.name);
+                        panic!(
+                            "\"{}\" already has \"{}\" as an alias, so it can't be a command name",
+                            other.1.name, cmd.1.name
+                        );
                     }
                     for alias in cmd.1.aliases.iter() {
                         if alias == &other.1.name {
-                            panic!("There is already a command named {}, so it can't be an alias", alias);
+                            panic!(
+                                "There is already a command named {}, so it can't be an alias",
+                                alias
+                            );
                         }
-                        if other.1.aliases.iter().any(|other_alias| alias == other_alias) {
+                        if other
+                            .1
+                            .aliases
+                            .iter()
+                            .any(|other_alias| alias == other_alias)
+                        {
                             panic!("\"{}\" already has \"{}\" as an alias, so it can't an alias for \"{}\"", other.1.name, alias, cmd.1.name);
                         }
                     }

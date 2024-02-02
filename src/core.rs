@@ -57,12 +57,16 @@ impl<C> CLICore<C> {
                         match &req.ty {
                             CommandParamTy::Unbound { minimum, param } => {
                                 if iter.len() < minimum.get() {
-                                    return Err(InputError::ArgumentCnt { name: raw_cmd.clone(), expected: params.required().len() - 1 + minimum.get(), got: overall_len });
+                                    return Err(InputError::ArgumentCnt {
+                                        name: raw_cmd.clone(),
+                                        expected: params.required().len() - 1 + minimum.get(),
+                                        got: overall_len,
+                                    });
                                 }
                                 for param_val in iter.clone() {
                                     param.validate(param_val, req.name)?;
                                 }
-                            },
+                            }
                             _ => req.ty.validate(iter.next().unwrap(), req.name)?,
                         }
                     }
@@ -206,9 +210,15 @@ impl<C> CommandBuilder<C> {
         let param_bounds = {
             match &self.params {
                 Some(usage) => {
-                    let mut min = usage.inner.req.len() + usage.inner.opt.len() + usage.inner.opt_prefixed.len();
+                    let mut min = usage.inner.req.len()
+                        + usage.inner.opt.len()
+                        + usage.inner.opt_prefixed.len();
                     let mut max = min;
-                    let params = [usage.inner.req.last(), usage.inner.opt.last(), usage.inner.opt_prefixed.last()];
+                    let params = [
+                        usage.inner.req.last(),
+                        usage.inner.opt.last(),
+                        usage.inner.opt_prefixed.last(),
+                    ];
                     for param in params {
                         if let Some(param) = param {
                             if let CommandParamTy::Unbound { minimum, .. } = &param.ty {
@@ -219,7 +229,7 @@ impl<C> CommandBuilder<C> {
                         }
                     }
                     min..max
-                },
+                }
                 None => 0..0,
             }
         };
@@ -384,7 +394,9 @@ impl CommandParamTy {
                     }
                 }
             },
-            CommandParamTy::Unbound { .. } => unreachable!("Unbound should have been checked for previously"),
+            CommandParamTy::Unbound { .. } => {
+                unreachable!("Unbound should have been checked for previously")
+            }
         }
     }
 
@@ -456,7 +468,7 @@ impl CommandParamTy {
                         }
                     }
                     finished.push_str("\n");
-                }   
+                }
                 if !variants.values().is_empty() {
                     finished.push_str(" ".repeat(indents).as_str());
                 }
@@ -469,10 +481,9 @@ impl CommandParamTy {
                 finished.push_str("...] "); // FIXME: is there a better visual representation?
                 finished.push_str(&param.to_string(indents));
                 finished
-            },
+            }
         }
     }
-
 }
 
 pub struct ParamInvalidError {
@@ -679,7 +690,13 @@ impl<'a> UsageBuilder<BuilderMutable> {
         if !self.inner.opt.is_empty() {
             panic!("you can only append required parameters before any optional parameters get appended");
         }
-        if matches!(self.inner.req.last(), Some(CommandParam { ty: CommandParamTy::Unbound { .. }, .. })) {
+        if matches!(
+            self.inner.req.last(),
+            Some(CommandParam {
+                ty: CommandParamTy::Unbound { .. },
+                ..
+            })
+        ) {
             panic!("you can't append parameters after unbound parameters");
         }
         self.inner.req.push(param);
@@ -687,11 +704,28 @@ impl<'a> UsageBuilder<BuilderMutable> {
     }
 
     pub fn optional(mut self, param: CommandParam) -> Self {
-        if matches!(self.inner.req.last(), Some(CommandParam { ty: CommandParamTy::Unbound { .. }, .. })) {
+        if matches!(
+            self.inner.req.last(),
+            Some(CommandParam {
+                ty: CommandParamTy::Unbound { .. },
+                ..
+            })
+        ) {
             panic!("you can't append parameters after unbound parameters");
         }
-        if matches!(self.inner.req.last(), Some(CommandParam { ty: CommandParamTy::Unbound { .. }, .. })) ||
-        matches!(self.inner.opt.last(), Some(CommandParam { ty: CommandParamTy::Unbound { .. }, .. })) {
+        if matches!(
+            self.inner.req.last(),
+            Some(CommandParam {
+                ty: CommandParamTy::Unbound { .. },
+                ..
+            })
+        ) || matches!(
+            self.inner.opt.last(),
+            Some(CommandParam {
+                ty: CommandParamTy::Unbound { .. },
+                ..
+            })
+        ) {
             panic!("you can't append parameters after unbound parameters");
         }
         self.inner.opt.push(param);
