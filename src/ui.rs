@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::rc::Rc;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use crate::core::{CLICore, Command, CommandBuilder, InputError};
@@ -66,7 +67,7 @@ impl<CTX: Send + Sync> CmdLineInterface<CTX> {
     }
 
     #[inline]
-    pub fn cmds(&self) -> Arc<HashMap<String, Command<CTX>>> {
+    pub fn cmds(&self) -> Arc<HashMap<String, Rc<Command<CTX>>>> {
         let windows = self.windows.read().unwrap();
         windows.last().unwrap().cmds().clone()
     }
@@ -98,7 +99,7 @@ impl<CTX: Send + Sync> CmdLineInterface<CTX> {
 pub struct Cmds<'a, CTX: Send + Sync>(RwLockReadGuard<'a, Vec<Arc<Window<CTX>>>>, &'a Window<CTX>);
 
 impl<'a, CTX: Send + Sync> Deref for Cmds<'a, CTX> {
-    type Target = HashMap<String, Command<CTX>>;
+    type Target = HashMap<String, Rc<Command<CTX>>>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -165,7 +166,7 @@ impl<CTX: Send + Sync> Window<CTX> {
     }
 
     #[inline(always)]
-    pub fn cmds(&self) -> &Arc<HashMap<String, Command<CTX>>> {
+    pub fn cmds(&self) -> &Arc<HashMap<String, Rc<Command<CTX>>>> {
         self.core.cmds()
     }
 
@@ -220,6 +221,27 @@ impl<CTX: Send + Sync> CLIBuilder<CTX> {
     }
 
     pub fn command(mut self, cmd: CommandBuilder<CTX>) -> Self {
+        // ensure the name and aliases are unique
+        for cmd in self.cmds.iter().enumerate() {
+            for other in self.cmds.iter().enumerate() {
+                if cmd.0 != other.0 {
+                    if cmd.1.name == other.1.name {
+                        panic!("There is already a command named {}", cmd.1.name);
+                    }
+                    if other.1.aliases.iter().any(|alias| alias == &cmd.1.name) {
+                        panic!("\"{}\" already has \"{}\" as an alias, so it can't be a command name", other.1.name, cmd.1.name);
+                    }
+                    for alias in cmd.1.aliases.iter() {
+                        if alias == &other.1.name {
+                            panic!("There is already a command named {}, so it can't be an alias", alias);
+                        }
+                        if other.1.aliases.iter().any(|other_alias| alias == other_alias) {
+                            panic!("\"{}\" already has \"{}\" as an alias, so it can't an alias for \"{}\"", other.1.name, alias, cmd.1.name);
+                        }
+                    }
+                }
+            }
+        }
         self.cmds.push(cmd);
         self
     }

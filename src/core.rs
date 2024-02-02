@@ -2,20 +2,27 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
+use std::mem;
 use std::num::NonZeroUsize;
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub struct CLICore<C> {
-    cmds: Arc<HashMap<String, Command<C>>>,
+    cmds: Arc<HashMap<String, Rc<Command<C>>>>,
 }
 
 impl<C> CLICore<C> {
     pub fn new(commands: Vec<CommandBuilder<C>>) -> Self {
         let mut cmds = HashMap::new();
 
-        for cmd in commands.into_iter() {
-            cmds.insert(cmd.name.clone(), cmd.build());
+        for mut cmd in commands.into_iter() {
+            let aliases = mem::take(&mut cmd.aliases);
+            let cmd = Rc::new(cmd.build());
+            cmds.insert(cmd.name.clone(), cmd.clone());
+            for alias in aliases {
+                cmds.insert(alias, cmd.clone());
+            }
         }
         Self {
             cmds: Arc::new(cmds),
@@ -72,7 +79,7 @@ impl<C> CLICore<C> {
     }
 
     #[inline(always)]
-    pub fn cmds(&self) -> &Arc<HashMap<String, Command<C>>> {
+    pub fn cmds(&self) -> &Arc<HashMap<String, Rc<Command<C>>>> {
         &self.cmds
     }
 }
@@ -125,7 +132,6 @@ pub struct Command<C> {
     name: String,
     desc: Option<&'static str>,
     params: Option<UsageBuilder<BuilderImmutable>>,
-    aliases: Vec<String>, // FIXME: support this!
     cmd_impl: Box<dyn CommandImpl<CTX = C>>,
     param_bounds: Range<usize>,
 }
@@ -154,10 +160,10 @@ pub trait CommandImpl: Send + Sync {
 }
 
 pub struct CommandBuilder<C> {
-    name: String,
+    pub(crate) name: String,
     desc: Option<&'static str>,
     params: Option<UsageBuilder<BuilderImmutable>>,
-    aliases: Vec<String>,
+    pub(crate) aliases: Vec<String>,
     cmd_impl: Box<dyn CommandImpl<CTX = C>>,
 }
 
@@ -221,7 +227,6 @@ impl<C> CommandBuilder<C> {
             name: self.name,
             desc: self.desc,
             params: self.params,
-            aliases: self.aliases,
             cmd_impl: self.cmd_impl,
             param_bounds,
         }
