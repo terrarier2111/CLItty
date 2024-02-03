@@ -260,7 +260,8 @@ impl CommandParam {
 
 #[derive(Clone)]
 pub enum CommandParamTy {
-    Int(CmdParamNumConstraints<usize>),
+    Int(CmdParamNumConstraints<isize>),
+    UInt(CmdParamNumConstraints<usize>),
     Decimal(CmdParamDecimalConstraints<f64>),
     String(CmdParamStrConstraints),
     Enum(CmdParamEnumConstraints),
@@ -274,7 +275,7 @@ impl CommandParamTy {
     pub fn validate(&self, input: &str, param_name: &str) -> Result<(), ParamInvalidError> {
         match self {
             CommandParamTy::Int(constraints) => {
-                let num = input.parse::<usize>();
+                let num = input.parse::<isize>();
                 match num {
                     Ok(num) => match constraints {
                         CmdParamNumConstraints::Range(range) => {
@@ -292,6 +293,38 @@ impl CommandParamTy {
                                 Err(ParamInvalidError {
                                     name: param_name.to_string(),
                                     kind: ParamInvalidErrorKind::IntInvalidVariant(&variants, num),
+                                })
+                            } else {
+                                Ok(())
+                            }
+                        }
+                        CmdParamNumConstraints::None => Ok(()),
+                    },
+                    Err(_) => Err(ParamInvalidError {
+                        name: param_name.to_string(),
+                        kind: ParamInvalidErrorKind::NoNum(input.to_string()),
+                    }),
+                }
+            }
+            CommandParamTy::UInt(constraints) => {
+                let num = input.parse::<usize>();
+                match num {
+                    Ok(num) => match constraints {
+                        CmdParamNumConstraints::Range(range) => {
+                            if range.start > num || range.end < num {
+                                Err(ParamInvalidError {
+                                    name: param_name.to_string(),
+                                    kind: ParamInvalidErrorKind::UIntOOB(range.clone(), num),
+                                })
+                            } else {
+                                Ok(())
+                            }
+                        }
+                        CmdParamNumConstraints::Variants(variants) => {
+                            if !variants.iter().any(|variant| *variant == num) {
+                                Err(ParamInvalidError {
+                                    name: param_name.to_string(),
+                                    kind: ParamInvalidErrorKind::UIntInvalidVariant(&variants, num),
                                 })
                             } else {
                                 Ok(())
@@ -422,6 +455,24 @@ impl CommandParamTy {
                     finished
                 }
                 CmdParamNumConstraints::None => String::from("int"),
+            },
+            CommandParamTy::UInt(constraints) => match constraints {
+                CmdParamNumConstraints::Range(range) => {
+                    format!("int({} to {})", range.start, range.end)
+                }
+                CmdParamNumConstraints::Variants(variants) => {
+                    let mut finished = String::from("uint(");
+                    let mut variants = variants.iter();
+                    if let Some(variant) = variants.next() {
+                        finished.push_str(format!("{}", variant).as_str());
+                        for variant in variants {
+                            finished.push_str(format!(", {}", variant).as_str());
+                        }
+                    }
+                    finished.push(')');
+                    finished
+                }
+                CmdParamNumConstraints::None => String::from("uint"),
             },
             CommandParamTy::Decimal(constraints) => match constraints {
                 CmdParamDecimalConstraints::Range(range) => {
@@ -568,6 +619,31 @@ impl Display for ParamInvalidError {
                 f.write_str(") of parameter ")?;
                 f.write_str(&self.name)
             }
+            ParamInvalidErrorKind::UIntOOB(range, val) => {
+                if *val > range.end {
+                    f.write_str(val.to_string().as_str())?;
+                    f.write_str(" is too large for parameter (max: ")?;
+                    f.write_str(range.end.to_string().as_str())?;
+                    f.write_str(")")
+                } else {
+                    f.write_str(val.to_string().as_str())?;
+                    f.write_str(" is too short for parameter (min len: ")?;
+                    f.write_str(range.start.to_string().as_str())?;
+                    f.write_str(")")
+                }
+            }
+            ParamInvalidErrorKind::UIntInvalidVariant(variants, val) => {
+                f.write_str(val.to_string().as_str())?;
+                f.write_str(" is not one of the valid variants (")?;
+                for (idx, variant) in variants.iter().enumerate() {
+                    f.write_str(variant.to_string().as_str())?;
+                    if idx != variants.len() - 1 {
+                        f.write_str(", ")?;
+                    }
+                }
+                f.write_str(") of parameter ")?;
+                f.write_str(&self.name)
+            }
             ParamInvalidErrorKind::NoDecimal(input) => {
                 f.write_str(&input)?;
                 f.write_str("is not a decimal number, but the parameter ")?;
@@ -602,8 +678,10 @@ pub enum ParamInvalidErrorKind {
     StringInvalidVariant(&'static [&'static str], String),
     EnumInvalidVariant(Vec<(&'static str, EnumVal)>, String),
     NoNum(String),
-    IntOOB(Range<usize>, usize),
-    IntInvalidVariant(&'static [usize], usize),
+    IntOOB(Range<isize>, isize),
+    IntInvalidVariant(&'static [isize], isize),
+    UIntOOB(Range<usize>, usize),
+    UIntInvalidVariant(&'static [usize], usize),
     NoDecimal(String),
     DecimalOOB(Range<f64>, f64),
 }
