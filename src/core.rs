@@ -608,7 +608,7 @@ pub enum ParamInvalidErrorKind {
 #[derive(Clone)]
 pub enum EnumVal {
     Simple(CommandParamTy),
-    Complex(UsageSubBuilder<BuilderMutable>), // FIXME: replace this with a normal UsageBuilder if possible to allow for optional arguments
+    Complex(UsageBuilder<BuilderMutable>),
     None,
 }
 
@@ -656,13 +656,16 @@ pub struct BuilderMutable;
 #[derive(Clone, Copy)]
 pub struct BuilderImmutable;
 
+#[derive(Clone)]
 struct InnerBuilder {
     prefix: Option<String>,
     req: Vec<CommandParam>,
     opt: Vec<CommandParam>,
     opt_prefixed: Vec<CommandParam>,
+    sub_has_opt: bool,
 }
 
+#[derive(Clone)]
 pub struct UsageBuilder<M = BuilderMutable> {
     inner: InnerBuilder,
     mutability: PhantomData<M>,
@@ -676,6 +679,7 @@ impl<'a> UsageBuilder<BuilderMutable> {
                 req: vec![],
                 opt: vec![],
                 opt_prefixed: vec![],
+                sub_has_opt: false,
             },
             mutability: PhantomData,
         }
@@ -698,6 +702,12 @@ impl<'a> UsageBuilder<BuilderMutable> {
             })
         ) {
             panic!("you can't append parameters after unbound parameters");
+        }
+        if self.inner.sub_has_opt {
+            panic!("You may not append a parameter after a sub parameter had optional parameters");
+        }
+        if has_optional_params(&param.ty) {
+            self.inner.sub_has_opt = true;
         }
         self.inner.req.push(param);
         self
@@ -728,6 +738,12 @@ impl<'a> UsageBuilder<BuilderMutable> {
         ) {
             panic!("you can't append parameters after unbound parameters");
         }
+        if self.inner.sub_has_opt {
+            panic!("You may not append a parameter after a sub parameter had optional parameters");
+        }
+        if has_optional_params(&param.ty) {
+            self.inner.sub_has_opt = true;
+        }
         self.inner.opt.push(param);
         self
     }
@@ -735,6 +751,12 @@ impl<'a> UsageBuilder<BuilderMutable> {
     pub fn optional_prefixed(mut self, param: CommandParam) -> Self {
         if self.inner.prefix.is_none() {
             panic!("a prefix has to be specified in order to add optional prefixed parameters");
+        }
+        if self.inner.sub_has_opt {
+            panic!("You may not append a parameter after a sub parameter had optional parameters");
+        }
+        if has_optional_params(&param.ty) {
+            self.inner.sub_has_opt = true;
         }
         self.inner.opt_prefixed.push(param);
         self
@@ -770,68 +792,7 @@ impl UsageBuilder<BuilderImmutable> {
     }
 }
 
-#[derive(Clone)]
-struct InnerSubBuilder {
-    prefix: Option<String>,
-    req: Vec<CommandParam>,
-    opt_prefixed: Vec<CommandParam>,
-}
-
-#[derive(Clone)]
-pub struct UsageSubBuilder<M = BuilderMutable> {
-    inner: InnerSubBuilder,
-    mutability: PhantomData<M>,
-}
-
-impl<'a> UsageSubBuilder<BuilderMutable> {
-    pub const fn new() -> Self {
-        Self {
-            inner: InnerSubBuilder {
-                prefix: None,
-                req: vec![],
-                opt_prefixed: vec![],
-            },
-            mutability: PhantomData,
-        }
-    }
-
-    pub fn optional_prefixed_prefix(mut self, prefix: String) -> Self {
-        self.inner.prefix = Some(prefix);
-        self
-    }
-
-    pub fn required(mut self, param: CommandParam) -> Self {
-        self.inner.req.push(param);
-        self
-    }
-
-    pub fn optional_prefixed(mut self, param: CommandParam) -> Self {
-        if self.inner.prefix.is_none() {
-            panic!("a prefix has to be specified in order to add optional prefixed parameters");
-        }
-        self.inner.opt_prefixed.push(param);
-        self
-    }
-}
-
-impl UsageSubBuilder<BuilderImmutable> {
-    #[inline(always)]
-    pub const fn optional_prefixed_prefix(&self) -> &Option<String> {
-        &self.inner.prefix
-    }
-
-    #[inline(always)]
-    pub const fn required(&self) -> &Vec<CommandParam> {
-        &self.inner.req
-    }
-
-    #[inline(always)]
-    pub const fn optional_prefixed(&self) -> &Vec<CommandParam> {
-        &self.inner.opt_prefixed
-    }
-}
-
-impl<M> UsageSubBuilder<M> {
+impl<M> UsageBuilder<M> {
     fn to_string(&self, indents: usize) -> String {
         let mut finished = String::new();
         let mut req = self.inner.req.iter();
@@ -854,4 +815,29 @@ impl<M> UsageSubBuilder<M> {
         }
         finished
     }
+}
+
+fn has_optional_params(ty: &CommandParamTy) -> bool {
+    if let CommandParamTy::Enum(constraints) = ty {
+        let mut constraints = constraints;
+        loop {
+            for entry in constraints.values().iter() {
+                match &entry.1 {
+                    EnumVal::Simple(ty) => {
+                        if let CommandParamTy::Enum(new_constr) = ty {
+                            constraints = new_constr;
+                        } else {
+                            return false;
+                        }
+                    }
+                    EnumVal::Complex(builder) => {
+                        return !builder.inner.opt.is_empty()
+                            || !builder.inner.opt_prefixed.is_empty()
+                    }
+                    EnumVal::None => return false,
+                }
+            }
+        }
+    }
+    false
 }
