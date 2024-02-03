@@ -88,6 +88,9 @@ impl<C> CLICore<C> {
     }
 }
 
+unsafe impl<C> Send for CLICore<C> {}
+unsafe impl<C> Sync for CLICore<C> {}
+
 pub enum InputError {
     ArgumentCnt {
         name: String,
