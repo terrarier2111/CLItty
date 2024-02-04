@@ -63,7 +63,6 @@ impl<CTX: Send + Sync> CmdLineInterface<CTX> {
         windows.last().unwrap().set_prompt(prompt);
     }
 
-    #[inline]
     pub fn cmds(&self) -> CommandIter<'_, CTX> {
         let windows = self.windows.read().unwrap();
         windows.last().unwrap().cmds()
@@ -151,9 +150,13 @@ impl<CTX: Send + Sync> Window<CTX> {
         self.term.reapply_prompt();
     }
 
-    #[inline(always)]
     pub fn cmds<'a>(&self) -> CommandIter<'a, CTX> {
         self.core.cmds()
+    }
+
+    #[inline(always)]
+    pub fn cmd_count(&self) -> usize {
+        self.core.cmd_count()
     }
 
     pub fn println(&self, line: &str) {
