@@ -11,10 +11,12 @@ use std::sync::Arc;
 
 pub struct CLICore<C> {
     cmds: Arc<HashMap<String, (bool, Rc<Command<C>>)>>,
+    cmd_cnt: usize,
 }
 
 impl<C> CLICore<C> {
     pub fn new(commands: Vec<CommandBuilder<C>>) -> Self {
+        let cmd_cnt = commands.len();
         let mut cmds = HashMap::new();
 
         for mut cmd in commands.into_iter() {
@@ -27,6 +29,7 @@ impl<C> CLICore<C> {
         }
         Self {
             cmds: Arc::new(cmds),
+            cmd_cnt,
         }
     }
 
@@ -84,7 +87,6 @@ impl<C> CLICore<C> {
         }
     }
 
-    #[inline(always)]
     pub fn cmds<'a>(&self) -> CommandIter<'a, C> {
         // SAFETY: this is safe as the iterator holds an arc to the underlying data for this iterator
         // and the references it hands out are only life as long as it self is.
@@ -98,6 +100,11 @@ impl<C> CLICore<C> {
             _guard: self.cmds.clone(),
             _phantom_data: PhantomData,
         }
+    }
+
+    #[inline(always)]
+    pub fn cmd_count(&self) -> usize {
+        self.cmd_cnt
     }
 }
 
@@ -198,6 +205,7 @@ impl<C> CommandBuilder<C> {
         }
     }
 
+    #[inline]
     pub fn desc(mut self, desc: &'static str) -> Self {
         self.desc = Some(desc);
         self
