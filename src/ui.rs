@@ -1,12 +1,9 @@
 use crossterm::{terminal, QueueableCommand};
-use std::collections::HashMap;
 use std::io::Write;
 use std::marker::PhantomData;
-use std::ops::Deref;
-use std::rc::Rc;
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::sync::{Arc, RwLock};
 
-use crate::core::{CLICore, Command, CommandBuilder, InputError};
+use crate::core::{CLICore, CommandBuilder, CommandIter, InputError};
 
 use self::term::StdioTerm;
 // This module is mainly used for debugging purposes
@@ -67,9 +64,9 @@ impl<CTX: Send + Sync> CmdLineInterface<CTX> {
     }
 
     #[inline]
-    pub fn cmds(&self) -> Arc<HashMap<String, Rc<Command<CTX>>>> {
+    pub fn cmds(&self) -> CommandIter<'_, CTX> {
         let windows = self.windows.read().unwrap();
-        windows.last().unwrap().cmds().clone()
+        windows.last().unwrap().cmds()
     }
 
     pub fn await_input(&self, ctx: &CTX) -> anyhow::Result<bool> {
@@ -93,17 +90,6 @@ impl<CTX: Send + Sync> CmdLineInterface<CTX> {
                 }
             }
         }
-    }
-}
-
-pub struct Cmds<'a, CTX: Send + Sync>(RwLockReadGuard<'a, Vec<Arc<Window<CTX>>>>, &'a Window<CTX>);
-
-impl<'a, CTX: Send + Sync> Deref for Cmds<'a, CTX> {
-    type Target = HashMap<String, Rc<Command<CTX>>>;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.1.cmds()
     }
 }
 
@@ -166,7 +152,7 @@ impl<CTX: Send + Sync> Window<CTX> {
     }
 
     #[inline(always)]
-    pub fn cmds(&self) -> &Arc<HashMap<String, Rc<Command<CTX>>>> {
+    pub fn cmds<'a>(&self) -> CommandIter<'a, CTX> {
         self.core.cmds()
     }
 

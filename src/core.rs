@@ -1,15 +1,16 @@
+use std::collections::hash_map::Iter;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
-use std::mem;
+use std::mem::{self, transmute};
 use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
 pub struct CLICore<C> {
-    cmds: Arc<HashMap<String, Rc<Command<C>>>>,
+    cmds: Arc<HashMap<String, (bool, Rc<Command<C>>)>>,
 }
 
 impl<C> CLICore<C> {
@@ -19,9 +20,9 @@ impl<C> CLICore<C> {
         for mut cmd in commands.into_iter() {
             let aliases = mem::take(&mut cmd.aliases);
             let cmd = Rc::new(cmd.build());
-            cmds.insert(cmd.name.clone(), cmd.clone());
+            cmds.insert(cmd.name.clone(), (true, cmd.clone()));
             for alias in aliases {
-                cmds.insert(alias, cmd.clone());
+                cmds.insert(alias, (false, cmd.clone()));
             }
         }
         Self {
@@ -38,6 +39,7 @@ impl<C> CLICore<C> {
         match self.cmds.get(&raw_cmd) {
             None => Err(InputError::CommandNotFound { name: raw_cmd }),
             Some(cmd) => {
+                let cmd = &cmd.1;
                 let (expected_min, expected_max) = (cmd.param_bounds.start, cmd.param_bounds.end);
                 if expected_min > parts.len() || expected_max < parts.len() {
                     return Err(InputError::ArgumentCnt {
@@ -83,8 +85,19 @@ impl<C> CLICore<C> {
     }
 
     #[inline(always)]
-    pub fn cmds(&self) -> &Arc<HashMap<String, Rc<Command<C>>>> {
-        &self.cmds
+    pub fn cmds<'a>(&self) -> CommandIter<'a, C> {
+        // SAFETY: this is safe as the iterator holds an arc to the underlying data for this iterator
+        // and the references it hands out are only life as long as it self is.
+        CommandIter {
+            inner: unsafe {
+                transmute::<
+                    Iter<'_, String, (bool, Rc<Command<C>>)>,
+                    Iter<'static, String, (bool, Rc<Command<C>>)>,
+                >(self.cmds.iter())
+            },
+            _guard: self.cmds.clone(),
+            _phantom_data: PhantomData,
+        }
     }
 }
 
@@ -921,4 +934,28 @@ fn has_optional_params(ty: &CommandParamTy) -> bool {
         }
     }
     false
+}
+
+pub struct CommandIter<'a, C: 'static> {
+    inner: Iter<'static, String, (bool, Rc<Command<C>>)>,
+    _guard: Arc<HashMap<String, (bool, Rc<Command<C>>)>>,
+    _phantom_data: PhantomData<&'a ()>,
+}
+
+impl<'a, C: 'static> Iterator for CommandIter<'a, C> {
+    type Item = &'a Command<C>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // loop as we have to skip aliases
+        loop {
+            match self.inner.next() {
+                Some(val) => {
+                    if val.1 .0 {
+                        return Some(val.1 .1.as_ref());
+                    }
+                }
+                None => return None,
+            }
+        }
+    }
 }
