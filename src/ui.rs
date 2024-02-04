@@ -68,6 +68,11 @@ impl<CTX: Send + Sync> CmdLineInterface<CTX> {
         windows.last().unwrap().cmds()
     }
 
+    pub fn cmd_count(&self) -> usize {
+        let windows = self.windows.read().unwrap();
+        windows.last().unwrap().cmd_count()
+    }
+
     pub fn await_input(&self, ctx: &CTX) -> anyhow::Result<bool> {
         loop {
             let windows = self.windows.read().unwrap();
