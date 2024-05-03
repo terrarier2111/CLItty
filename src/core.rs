@@ -966,4 +966,8 @@ impl<'a, C: 'static> Iterator for CommandIter<'a, C> {
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
