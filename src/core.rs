@@ -250,6 +250,23 @@ impl<C> CommandBuilder<C> {
                                 max = usize::MAX;
                                 break;
                             }
+                            if let CommandParamTy::Enum(constraints) = &param.ty {
+                                let constraints = match constraints {
+                                    CmdParamEnumConstraints::IgnoreCase(inner) => inner,
+                                    CmdParamEnumConstraints::Exact(inner) => inner,
+                                };
+                                for c in constraints {
+                                    match &c.1 {
+                                        EnumVal::Simple(_val) => max += 1, // FIXME: support multiple enum/unbound layers
+                                        EnumVal::Complex(vals) => {
+                                            max += vals.inner.req.len()
+                                                + vals.inner.opt.len()
+                                                + vals.inner.opt_prefixed.len()
+                                        } // FIXME: support multiple enum/unbound layers
+                                        EnumVal::None => {}
+                                    }
+                                }
+                            }
                         }
                     }
                     min..max
