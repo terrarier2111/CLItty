@@ -9,6 +9,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
+// FIXME: implement dynamic argument count checks, that are taking selected enum variants into account
 pub struct CLICore<C> {
     cmds: Arc<HashMap<String, (bool, Rc<Command<C>>)>>,
     cmd_cnt: usize,
@@ -34,11 +35,12 @@ impl<C> CLICore<C> {
     }
 
     pub fn process(&self, ctx: &C, input: &str) -> Result<(), InputError> {
-        let mut parts = input.split(' ').collect::<Vec<_>>();
+        let parts = input.split(' ').collect::<Vec<_>>();
         if parts.is_empty() {
             return Err(InputError::InputEmpty);
         }
-        let raw_cmd = parts.remove(0).to_lowercase();
+        let raw_cmd = parts[0].to_lowercase();
+        let parts = &parts[1..];
         match self.cmds.get(&raw_cmd) {
             None => Err(InputError::CommandNotFound { name: raw_cmd }),
             Some(cmd) => {
@@ -1008,8 +1010,8 @@ impl<'a, C: 'static> Iterator for CommandIter<'a, C> {
         loop {
             match self.inner.next() {
                 Some(val) => {
-                    if val.1 .0 {
-                        return Some(val.1 .1.as_ref());
+                    if val.1.0 {
+                        return Some(val.1.1.as_ref());
                     }
                 }
                 None => return None,
