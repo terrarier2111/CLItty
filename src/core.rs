@@ -234,42 +234,8 @@ impl<C> CommandBuilder<C> {
         let param_bounds = {
             match &self.params {
                 Some(usage) => {
-                    let mut min = usage.inner.req.len()
-                        + usage.inner.opt.len()
-                        + usage.inner.opt_prefixed.len();
-                    let mut max = min;
-                    let params = [
-                        usage.inner.req.last(),
-                        usage.inner.opt.last(),
-                        usage.inner.opt_prefixed.last(),
-                    ];
-                    for param in params {
-                        if let Some(param) = param {
-                            if let CommandParamTy::Unbound { minimum, .. } = &param.ty {
-                                min = min - 1 + minimum.get();
-                                max = usize::MAX;
-                                break;
-                            }
-                            if let CommandParamTy::Enum(constraints) = &param.ty {
-                                let constraints = match constraints {
-                                    CmdParamEnumConstraints::IgnoreCase(inner) => inner,
-                                    CmdParamEnumConstraints::Exact(inner) => inner,
-                                };
-                                for c in constraints {
-                                    match &c.1 {
-                                        EnumVal::Simple(_val) => max += 1, // FIXME: support multiple enum/unbound layers
-                                        EnumVal::Complex(vals) => {
-                                            max += vals.inner.req.len()
-                                                + vals.inner.opt.len()
-                                                + vals.inner.opt_prefixed.len()
-                                        } // FIXME: support multiple enum/unbound layers
-                                        EnumVal::None => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    min..max
+                    let (min, max) = calc_builder_size(usage);
+                    min..(max.unwrap_or(usize::MAX))
                 }
                 None => 0..0,
             }
@@ -282,6 +248,73 @@ impl<C> CommandBuilder<C> {
             param_bounds,
         }
     }
+}
+
+fn calc_params_list_size(params: &Vec<CommandParam>) -> (usize, Option<usize>) {
+    let mut min = 0;
+    let mut max = Some(0);
+    for param in params {
+        let (c_min, c_max) = calc_param_size(&param.ty);
+        min += c_min;
+        max = add_maximums(max, c_max);
+    }
+    (min, max)
+}
+
+fn calc_param_size(param: &CommandParamTy) -> (usize, Option<usize>) {
+    if let CommandParamTy::Unbound { minimum, .. } = param {
+        return (minimum.get(), None);
+    }
+    if let CommandParamTy::Enum(constraints) = param {
+        let constraints = match constraints {
+            CmdParamEnumConstraints::IgnoreCase(inner) => inner,
+            CmdParamEnumConstraints::Exact(inner) => inner,
+        };
+        let mut min = 0;
+        let mut max = Some(usize::MAX);
+        for c in constraints {
+            match &c.1 {
+                EnumVal::Simple(val) => {
+                    let (c_min, c_max) = calc_param_size(val);
+                    let c_min = c_min + 1;
+                    if min < c_min {
+                        min = c_min;
+                    }
+                    max = add_maximums(add_maximums(max, c_max), Some(1));
+                },
+                EnumVal::Complex(vals) => {
+                    min += 1;
+                    max = add_maximums(max, Some(1));
+
+                    let (c_min, c_max) = calc_builder_size(vals);
+                    min += c_min;
+                    max = add_maximums(max, c_max);
+                }
+                EnumVal::None => {}
+            }
+        }
+    }
+    (1, Some(1))
+}
+
+fn calc_builder_size<M>(builder: &UsageBuilder<M>) -> (usize, Option<usize>) {
+    let mut min = 0;
+    let mut max = None;
+    let (c_min, c_max) = calc_params_list_size(&builder.inner.req);
+    min += c_min;
+    max = add_maximums(max, c_max);
+    let (_, c_max) = calc_params_list_size(&builder.inner.opt);
+    max = add_maximums(max, c_max);
+    let (_, c_max) = calc_params_list_size(&builder.inner.opt_prefixed);
+    max = add_maximums(max, c_max);
+    (min, max)
+}
+
+fn add_maximums(first: Option<usize>, second: Option<usize>) -> Option<usize> {
+    if first.is_none() || second.is_none() {
+        return None;
+    }
+    Some(first.unwrap() + second.unwrap())
 }
 
 #[derive(Clone)]
