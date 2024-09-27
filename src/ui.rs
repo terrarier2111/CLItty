@@ -115,13 +115,20 @@ impl<CTX: Send + Sync> Window<CTX> {
             Ok(_) => Some(Ok(true)),
             Err(err) => match err {
                 InputError::ArgumentCnt {
-                    name,
+                    full_cmd,
                     expected,
                     got,
                 } => {
                     self.println(&format!(
-                        "The command {} expects {} arguments but got {}",
-                        name, expected, got
+                        "The command \"{}\" expects {} arguments but got {}",
+                        full_cmd, expected, got
+                    ));
+                    Some(Ok(false))
+                }
+                InputError::MissingArgument { full_cmd, name } => {
+                    self.println(&format!(
+                        "The command \"{}\" is missing a \"{}\" argument",
+                        full_cmd, name
                     ));
                     Some(Ok(false))
                 }

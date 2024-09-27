@@ -47,7 +47,7 @@ impl<C> CLICore<C> {
                 let (expected_min, expected_max) = (cmd.param_bounds.start, cmd.param_bounds.end);
                 if expected_min > parts.len() || expected_max < parts.len() {
                     return Err(InputError::ArgumentCnt {
-                        name: raw_cmd,
+                        full_cmd: raw_cmd,
                         expected: if expected_min > parts.len() {
                             expected_min
                         } else {
@@ -99,9 +99,13 @@ unsafe impl<C> Sync for CLICore<C> {}
 
 pub enum InputError {
     ArgumentCnt {
-        name: String,
+        full_cmd: String,
         expected: usize,
         got: usize,
+    },
+    MissingArgument {
+        full_cmd: String,
+        name: String,
     },
     CommandNotFound {
         name: String,
@@ -124,11 +128,12 @@ impl From<ParamInvalidError> for InputError {
 impl Debug for InputError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            InputError::ArgumentCnt { name, expected, got } => f.write_str(format!("The command \"{}\" expects an argument count of {} but only {} argument{} found", name.as_str(), *expected, *got, if *got == 1 { " was" } else { "s were" }).as_str()),
-            InputError::CommandNotFound { name } => f.write_str(format!("The command \"{}\" does not exist", name).as_str()),
-            InputError::InputEmpty => f.write_str("The given input was found to be empty"),
-            InputError::ExecError { name, error } => f.write_str(format!("There was an error executing the command \"{}\": \"{}\"", name, error).as_str()),
-            InputError::ParamInvalidError(error) => Display::fmt(error, f),
+            Self::ArgumentCnt { full_cmd, expected, got } => f.write_str(format!("The command \"{}\" expects an argument count of {} but only {} argument{} found", full_cmd, *expected, *got, if *got == 1 { " was" } else { "s were" }).as_str()),
+            Self::MissingArgument { full_cmd, name } => f.write_str(format!("The command \"{}\" expects an additional \"{}\" argument", full_cmd, name).as_str()),
+            Self::CommandNotFound { name } => f.write_str(format!("The command \"{}\" does not exist", name).as_str()),
+            Self::InputEmpty => f.write_str("The given input was found to be empty"),
+            Self::ExecError { name, error } => f.write_str(format!("There was an error executing the command \"{}\": \"{}\"", name, error).as_str()),
+            Self::ParamInvalidError(error) => Display::fmt(error, f),
         }
     }
 }
@@ -339,7 +344,7 @@ impl CommandParamTy {
             CommandParamTy::Unbound { minimum, param } => {
                 if iter.len() < minimum.get() {
                     return Err(InputError::ArgumentCnt {
-                        name: raw_cmd.clone(),
+                        full_cmd: raw_cmd.clone(),
                         expected: iter.cnt + minimum.get(),
                         got: iter.cnt,
                     });
@@ -353,10 +358,9 @@ impl CommandParamTy {
                 let (_, raw_val) = if let Some(val) = iter.next() {
                     val
                 } else {
-                    return Err(InputError::ArgumentCnt {
-                        name: raw_cmd.clone(),
-                        expected: iter.cnt + 1,
-                        got: iter.cnt,
+                    return Err(InputError::MissingArgument {
+                        full_cmd: raw_cmd.clone(),
+                        name: name.to_string(),
                     });
                 };
                 let (param_name, val) = 'ret: {
@@ -388,10 +392,9 @@ impl CommandParamTy {
                 if let Some(val) = iter.next() {
                     val.1
                 } else {
-                    return Err(InputError::ArgumentCnt {
-                        name: raw_cmd.to_string(),
-                        expected: iter.cnt + 1,
-                        got: iter.cnt,
+                    return Err(InputError::MissingArgument {
+                        full_cmd: raw_cmd.to_string(),
+                        name: name.to_string(),
                     });
                 },
                 name,
