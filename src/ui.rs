@@ -6,7 +6,6 @@ use std::sync::{Arc, RwLock};
 use crate::core::{CLICore, CommandBuilder, CommandIter, InputError};
 
 use self::term::StdioTerm;
-// This module is mainly used for debugging purposes
 
 // FIXME: maybe add tab completion
 
@@ -22,13 +21,12 @@ impl<CTX: Send + Sync> CmdLineInterface<CTX> {
     }
 
     pub fn push_screen(&self, window: Window<CTX>) {
-        self.windows.write().unwrap().push(Arc::new(window));
+        let mut windows = self.windows.write().unwrap();
+        windows.push(Arc::new(window));
         let mut lock = std::io::stdout().lock();
         lock.queue(terminal::EnterAlternateScreen).unwrap();
         lock.flush().unwrap();
-        self.windows
-            .read()
-            .unwrap()
+        windows
             .last()
             .unwrap()
             .reapply_prompt();
