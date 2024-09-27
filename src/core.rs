@@ -59,12 +59,7 @@ impl<C> CLICore<C> {
                 if let Some(params) = &cmd.params {
                     let mut iter = PeekEnum::new(parts.iter());
                     for req in params.required().iter() {
-                        req.ty.check_fully(
-                            &req.name,
-                            &mut iter,
-                            params.required().len(),
-                            &raw_cmd,
-                        )?;
+                        req.ty.check_fully(&req.name, &mut iter, &raw_cmd)?;
                     }
                 }
                 match cmd.cmd_impl.execute(ctx, &parts) {
@@ -338,7 +333,6 @@ impl CommandParamTy {
         &self,
         name: &str,
         iter: &mut PeekEnum<core::slice::Iter<'_, &str>>,
-        req_len: usize,
         raw_cmd: &String,
     ) -> Result<(), InputError> {
         match self {
@@ -346,7 +340,7 @@ impl CommandParamTy {
                 if iter.len() < minimum.get() {
                     return Err(InputError::ArgumentCnt {
                         name: raw_cmd.clone(),
-                        expected: req_len - 1 + minimum.get(),
+                        expected: iter.cnt + minimum.get(),
                         got: iter.cnt,
                     });
                 }
@@ -356,7 +350,7 @@ impl CommandParamTy {
                 Ok(())
             }
             CommandParamTy::Enum(constr) => {
-                let (raw_idx, raw_val) = if let Some(val) = iter.next() {
+                let (_, raw_val) = if let Some(val) = iter.next() {
                     val
                 } else {
                     return Err(InputError::ArgumentCnt {
@@ -365,10 +359,10 @@ impl CommandParamTy {
                         got: iter.cnt,
                     });
                 };
-                let val = 'ret: {
+                let (param_name, val) = 'ret: {
                     for elem in constr.values() {
                         if &elem.0 == raw_val {
-                            break 'ret &elem.1;
+                            break 'ret (elem.0, &elem.1);
                         }
                     }
                     return Err(InputError::ParamInvalidError(ParamInvalidError {
@@ -380,20 +374,10 @@ impl CommandParamTy {
                     }));
                 };
                 match val {
-                    EnumVal::Simple(cpt) => {
-                        if let Some(val) = iter.next() {
-                            cpt.check_fully(val.1, iter, req_len, raw_cmd)?
-                        } else {
-                            return Err(InputError::ArgumentCnt {
-                                name: raw_cmd.to_string(),
-                                expected: raw_idx + 1 + 1,
-                                got: raw_idx + 1,
-                            });
-                        }
-                    }
+                    EnumVal::Simple(cpt) => cpt.check_fully(param_name, iter, raw_cmd)?,
                     EnumVal::Complex(usage_builder) => {
                         for val in usage_builder.inner.req.iter() {
-                            val.ty.check_fully(&val.name, iter, req_len, raw_cmd)?;
+                            val.ty.check_fully(&val.name, iter, raw_cmd)?;
                         }
                     }
                     EnumVal::None => {}
