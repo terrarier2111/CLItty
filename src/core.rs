@@ -9,7 +9,6 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
-// FIXME: implement dynamic argument count checks, that are taking selected enum variants into account
 pub struct CLICore<C> {
     cmds: Arc<HashMap<String, (bool, Rc<Command<C>>)>>,
     cmd_cnt: usize,
@@ -58,24 +57,9 @@ impl<C> CLICore<C> {
                     });
                 }
                 if let Some(params) = &cmd.params {
-                    let mut iter = parts.iter();
-                    let overall_len = parts.len();
+                    let mut iter = PeekEnum::new(parts.iter());
                     for req in params.required().iter() {
-                        match &req.ty {
-                            CommandParamTy::Unbound { minimum, param } => {
-                                if iter.len() < minimum.get() {
-                                    return Err(InputError::ArgumentCnt {
-                                        name: raw_cmd.clone(),
-                                        expected: params.required().len() - 1 + minimum.get(),
-                                        got: overall_len,
-                                    });
-                                }
-                                for param_val in iter.clone() {
-                                    param.validate(param_val, req.name)?;
-                                }
-                            }
-                            _ => req.ty.validate(iter.next().unwrap(), req.name)?,
-                        }
+                        req.check_fully(&mut iter, params.required().len(), &raw_cmd)?;
                     }
                 }
                 match cmd.cmd_impl.execute(ctx, &parts) {
@@ -283,7 +267,7 @@ fn calc_param_size(param: &CommandParamTy) -> (usize, Option<usize>) {
                         min = c_min;
                     }
                     max = add_maximums(add_maximums(max, c_max), Some(1));
-                },
+                }
                 EnumVal::Complex(vals) => {
                     min += 1;
                     max = add_maximums(max, Some(1));
@@ -326,6 +310,86 @@ pub struct CommandParam {
 }
 
 impl CommandParam {
+    fn check_fully(
+        &self,
+        iter: &mut PeekEnum<core::slice::Iter<'_, &str>>,
+        req_len: usize,
+        raw_cmd: &String,
+    ) -> Result<(), InputError> {
+        match &self.ty {
+            CommandParamTy::Unbound { minimum, param } => {
+                if iter.len() < minimum.get() {
+                    return Err(InputError::ArgumentCnt {
+                        name: raw_cmd.clone(),
+                        expected: req_len - 1 + minimum.get(),
+                        got: iter.cnt,
+                    });
+                }
+                for param_val in iter.clone() {
+                    param.validate(param_val.1, self.name)?;
+                }
+                Ok(())
+            }
+            CommandParamTy::Enum(constr) => {
+                let (raw_idx, raw_val) = if let Some(val) = iter.next() {
+                    val
+                } else {
+                    return Err(InputError::ArgumentCnt {
+                        name: raw_cmd.clone(),
+                        expected: iter.cnt + 1,
+                        got: iter.cnt,
+                    });
+                };
+                let (param_name, val) = 'ret: {
+                    for elem in constr.values() {
+                        if &elem.0 == raw_val {
+                            break 'ret (elem.0, &elem.1);
+                        }
+                    }
+                    return Err(InputError::ParamInvalidError(ParamInvalidError {
+                        name: self.name.to_string(),
+                        kind: ParamInvalidErrorKind::EnumInvalidVariant(
+                            constr.values().clone(),
+                            raw_val.to_string(),
+                        ),
+                    }));
+                };
+                match val {
+                    EnumVal::Simple(cpt) => {
+                        if let Some(val) = iter.next() {
+                            cpt.validate(val.1, param_name)?
+                        } else {
+                            return Err(InputError::ArgumentCnt {
+                                name: raw_cmd.to_string(),
+                                expected: raw_idx + 1 + 1,
+                                got: raw_idx + 1,
+                            });
+                        }
+                    }
+                    EnumVal::Complex(usage_builder) => {
+                        for val in usage_builder.inner.req.iter() {
+                            val.check_fully(iter, req_len, raw_cmd)?;
+                        }
+                    }
+                    EnumVal::None => {}
+                }
+                Ok(())
+            }
+            _ => Ok(self.ty.validate(
+                if let Some(val) = iter.next() {
+                    val.1
+                } else {
+                    return Err(InputError::ArgumentCnt {
+                        name: raw_cmd.to_string(),
+                        expected: iter.cnt + 1,
+                        got: iter.cnt,
+                    });
+                },
+                self.name,
+            )?),
+        }
+    }
+
     fn to_string(&self, indent: usize) -> String {
         format!("{}({})", self.name, self.ty.to_string(indent))
     }
@@ -1010,8 +1074,8 @@ impl<'a, C: 'static> Iterator for CommandIter<'a, C> {
         loop {
             match self.inner.next() {
                 Some(val) => {
-                    if val.1.0 {
-                        return Some(val.1.1.as_ref());
+                    if val.1 .0 {
+                        return Some(val.1 .1.as_ref());
                     }
                 }
                 None => return None,
@@ -1021,5 +1085,43 @@ impl<'a, C: 'static> Iterator for CommandIter<'a, C> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
+    }
+}
+
+struct PeekEnum<T: Iterator> {
+    iter: T,
+    cnt: usize,
+}
+
+impl<T: Iterator> PeekEnum<T> {
+    fn new(iter: T) -> Self {
+        Self { iter, cnt: 0 }
+    }
+}
+
+impl<T: Iterator> Iterator for PeekEnum<T> {
+    type Item = (usize, T::Item);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(val) = self.iter.next() {
+            self.cnt += 1;
+            return Some((self.cnt, val));
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<T: Iterator + ExactSizeIterator> ExactSizeIterator for PeekEnum<T> {}
+
+impl<T: Iterator + Clone> Clone for PeekEnum<T> {
+    fn clone(&self) -> Self {
+        Self {
+            iter: self.iter.clone(),
+            cnt: self.cnt,
+        }
     }
 }
