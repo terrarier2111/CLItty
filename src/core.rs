@@ -59,7 +59,12 @@ impl<C> CLICore<C> {
                 if let Some(params) = &cmd.params {
                     let mut iter = PeekEnum::new(parts.iter());
                     for req in params.required().iter() {
-                        req.check_fully(&mut iter, params.required().len(), &raw_cmd)?;
+                        req.ty.check_fully(
+                            &req.name,
+                            &mut iter,
+                            params.required().len(),
+                            &raw_cmd,
+                        )?;
                     }
                 }
                 match cmd.cmd_impl.execute(ctx, &parts) {
@@ -310,86 +315,6 @@ pub struct CommandParam {
 }
 
 impl CommandParam {
-    fn check_fully(
-        &self,
-        iter: &mut PeekEnum<core::slice::Iter<'_, &str>>,
-        req_len: usize,
-        raw_cmd: &String,
-    ) -> Result<(), InputError> {
-        match &self.ty {
-            CommandParamTy::Unbound { minimum, param } => {
-                if iter.len() < minimum.get() {
-                    return Err(InputError::ArgumentCnt {
-                        name: raw_cmd.clone(),
-                        expected: req_len - 1 + minimum.get(),
-                        got: iter.cnt,
-                    });
-                }
-                for param_val in iter.clone() {
-                    param.validate(param_val.1, self.name)?;
-                }
-                Ok(())
-            }
-            CommandParamTy::Enum(constr) => {
-                let (raw_idx, raw_val) = if let Some(val) = iter.next() {
-                    val
-                } else {
-                    return Err(InputError::ArgumentCnt {
-                        name: raw_cmd.clone(),
-                        expected: iter.cnt + 1,
-                        got: iter.cnt,
-                    });
-                };
-                let (param_name, val) = 'ret: {
-                    for elem in constr.values() {
-                        if &elem.0 == raw_val {
-                            break 'ret (elem.0, &elem.1);
-                        }
-                    }
-                    return Err(InputError::ParamInvalidError(ParamInvalidError {
-                        name: self.name.to_string(),
-                        kind: ParamInvalidErrorKind::EnumInvalidVariant(
-                            constr.values().clone(),
-                            raw_val.to_string(),
-                        ),
-                    }));
-                };
-                match val {
-                    EnumVal::Simple(cpt) => {
-                        if let Some(val) = iter.next() {
-                            cpt.validate(val.1, param_name)?
-                        } else {
-                            return Err(InputError::ArgumentCnt {
-                                name: raw_cmd.to_string(),
-                                expected: raw_idx + 1 + 1,
-                                got: raw_idx + 1,
-                            });
-                        }
-                    }
-                    EnumVal::Complex(usage_builder) => {
-                        for val in usage_builder.inner.req.iter() {
-                            val.check_fully(iter, req_len, raw_cmd)?;
-                        }
-                    }
-                    EnumVal::None => {}
-                }
-                Ok(())
-            }
-            _ => Ok(self.ty.validate(
-                if let Some(val) = iter.next() {
-                    val.1
-                } else {
-                    return Err(InputError::ArgumentCnt {
-                        name: raw_cmd.to_string(),
-                        expected: iter.cnt + 1,
-                        got: iter.cnt,
-                    });
-                },
-                self.name,
-            )?),
-        }
-    }
-
     fn to_string(&self, indent: usize) -> String {
         format!("{}({})", self.name, self.ty.to_string(indent))
     }
@@ -409,6 +334,87 @@ pub enum CommandParamTy {
 }
 
 impl CommandParamTy {
+    fn check_fully(
+        &self,
+        name: &str,
+        iter: &mut PeekEnum<core::slice::Iter<'_, &str>>,
+        req_len: usize,
+        raw_cmd: &String,
+    ) -> Result<(), InputError> {
+        match self {
+            CommandParamTy::Unbound { minimum, param } => {
+                if iter.len() < minimum.get() {
+                    return Err(InputError::ArgumentCnt {
+                        name: raw_cmd.clone(),
+                        expected: req_len - 1 + minimum.get(),
+                        got: iter.cnt,
+                    });
+                }
+                for param_val in iter.clone() {
+                    param.validate(param_val.1, name)?;
+                }
+                Ok(())
+            }
+            CommandParamTy::Enum(constr) => {
+                let (raw_idx, raw_val) = if let Some(val) = iter.next() {
+                    val
+                } else {
+                    return Err(InputError::ArgumentCnt {
+                        name: raw_cmd.clone(),
+                        expected: iter.cnt + 1,
+                        got: iter.cnt,
+                    });
+                };
+                let val = 'ret: {
+                    for elem in constr.values() {
+                        if &elem.0 == raw_val {
+                            break 'ret &elem.1;
+                        }
+                    }
+                    return Err(InputError::ParamInvalidError(ParamInvalidError {
+                        name: name.to_string(),
+                        kind: ParamInvalidErrorKind::EnumInvalidVariant(
+                            constr.values().clone(),
+                            raw_val.to_string(),
+                        ),
+                    }));
+                };
+                match val {
+                    EnumVal::Simple(cpt) => {
+                        if let Some(val) = iter.next() {
+                            cpt.check_fully(val.1, iter, req_len, raw_cmd)?
+                        } else {
+                            return Err(InputError::ArgumentCnt {
+                                name: raw_cmd.to_string(),
+                                expected: raw_idx + 1 + 1,
+                                got: raw_idx + 1,
+                            });
+                        }
+                    }
+                    EnumVal::Complex(usage_builder) => {
+                        for val in usage_builder.inner.req.iter() {
+                            val.ty.check_fully(&val.name, iter, req_len, raw_cmd)?;
+                        }
+                    }
+                    EnumVal::None => {}
+                }
+                Ok(())
+            }
+            _ => Ok(self.validate(
+                if let Some(val) = iter.next() {
+                    val.1
+                } else {
+                    return Err(InputError::ArgumentCnt {
+                        name: raw_cmd.to_string(),
+                        expected: iter.cnt + 1,
+                        got: iter.cnt,
+                    });
+                },
+                name,
+            )?),
+        }
+    }
+
     pub fn validate(&self, input: &str, param_name: &str) -> Result<(), ParamInvalidError> {
         match self {
             CommandParamTy::Int(constraints) => {

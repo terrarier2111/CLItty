@@ -26,10 +26,7 @@ impl<CTX: Send + Sync> CmdLineInterface<CTX> {
         let mut lock = std::io::stdout().lock();
         lock.queue(terminal::EnterAlternateScreen).unwrap();
         lock.flush().unwrap();
-        windows
-            .last()
-            .unwrap()
-            .reapply_prompt();
+        windows.last().unwrap().reapply_prompt();
     }
 
     pub fn pop_screen(&self, ctx: &CTX) -> Option<Arc<Window<CTX>>> {
