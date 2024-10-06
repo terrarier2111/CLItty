@@ -44,18 +44,6 @@ impl<C> CLICore<C> {
             None => Err(InputError::CommandNotFound { name: raw_cmd }),
             Some(cmd) => {
                 let cmd = &cmd.1;
-                let (expected_min, expected_max) = (cmd.param_bounds.start, cmd.param_bounds.end);
-                if expected_min > parts.len() || expected_max < parts.len() {
-                    return Err(InputError::ArgumentCnt {
-                        full_cmd: raw_cmd,
-                        expected: if expected_min > parts.len() {
-                            expected_min
-                        } else {
-                            expected_max
-                        },
-                        got: parts.len(),
-                    });
-                }
                 if let Some(params) = &cmd.params {
                     let mut iter = PeekEnum::new(parts.iter());
                     for req in params.required().iter() {
@@ -151,7 +139,6 @@ pub struct Command<C> {
     desc: Option<&'static str>,
     params: Option<UsageBuilder<BuilderImmutable>>,
     cmd_impl: Box<dyn CommandImpl<CTX = C>>,
-    param_bounds: Range<usize>,
 }
 
 impl<C> Command<C> {
@@ -222,90 +209,13 @@ impl<C> CommandBuilder<C> {
     }
 
     fn build(self) -> Command<C> {
-        let param_bounds = {
-            match &self.params {
-                Some(usage) => {
-                    let (min, max) = calc_builder_size(usage);
-                    min..(max.unwrap_or(usize::MAX))
-                }
-                None => 0..0,
-            }
-        };
         Command {
             name: self.name,
             desc: self.desc,
             params: self.params,
             cmd_impl: self.cmd_impl,
-            param_bounds,
         }
     }
-}
-
-fn calc_params_list_size(params: &Vec<CommandParam>) -> (usize, Option<usize>) {
-    let mut min = 0;
-    let mut max = Some(0);
-    for param in params {
-        let (c_min, c_max) = calc_param_size(&param.ty);
-        min += c_min;
-        max = add_maximums(max, c_max);
-    }
-    (min, max)
-}
-
-fn calc_param_size(param: &CommandParamTy) -> (usize, Option<usize>) {
-    if let CommandParamTy::Unbound { minimum, .. } = param {
-        return (minimum.get(), None);
-    }
-    if let CommandParamTy::Enum(constraints) = param {
-        let constraints = match constraints {
-            CmdParamEnumConstraints::IgnoreCase(inner) => inner,
-            CmdParamEnumConstraints::Exact(inner) => inner,
-        };
-        let mut min = 0;
-        let mut max = Some(usize::MAX);
-        for c in constraints {
-            match &c.1 {
-                EnumVal::Simple(val) => {
-                    let (c_min, c_max) = calc_param_size(val);
-                    let c_min = c_min + 1;
-                    if min < c_min {
-                        min = c_min;
-                    }
-                    max = add_maximums(add_maximums(max, c_max), Some(1));
-                }
-                EnumVal::Complex(vals) => {
-                    min += 1;
-                    max = add_maximums(max, Some(1));
-
-                    let (c_min, c_max) = calc_builder_size(vals);
-                    min += c_min;
-                    max = add_maximums(max, c_max);
-                }
-                EnumVal::None => {}
-            }
-        }
-    }
-    (1, Some(1))
-}
-
-fn calc_builder_size<M>(builder: &UsageBuilder<M>) -> (usize, Option<usize>) {
-    let mut min = 0;
-    let mut max = None;
-    let (c_min, c_max) = calc_params_list_size(&builder.inner.req);
-    min += c_min;
-    max = add_maximums(max, c_max);
-    let (_, c_max) = calc_params_list_size(&builder.inner.opt);
-    max = add_maximums(max, c_max);
-    let (_, c_max) = calc_params_list_size(&builder.inner.opt_prefixed);
-    max = add_maximums(max, c_max);
-    (min, max)
-}
-
-fn add_maximums(first: Option<usize>, second: Option<usize>) -> Option<usize> {
-    if first.is_none() || second.is_none() {
-        return None;
-    }
-    Some(first.unwrap() + second.unwrap())
 }
 
 #[derive(Clone)]

@@ -288,7 +288,11 @@ mod term {
     use std::{
         collections::HashSet,
         io::Write,
-        sync::{atomic::AtomicBool, Mutex},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Mutex,
+        },
+        thread::panicking,
         time::Duration,
     };
 
@@ -325,15 +329,22 @@ mod term {
         reading: AtomicBool,
     }
 
+    static RAW_MODE: AtomicBool = AtomicBool::new(false);
+
+    impl Drop for StdioTerm {
+        fn drop(&mut self) {
+            if RAW_MODE.swap(false, Ordering::Relaxed) {
+                let result = disable_raw_mode();
+                if !panicking() {
+                    result.unwrap();
+                }
+            }
+        }
+    }
+
     fn ensure_raw() {
-        static RAW_MODE: AtomicBool = AtomicBool::new(false);
         if RAW_MODE
-            .compare_exchange(
-                false,
-                true,
-                std::sync::atomic::Ordering::Relaxed,
-                std::sync::atomic::Ordering::Relaxed,
-            )
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
             .is_err()
         {
             return;
