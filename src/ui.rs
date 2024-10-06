@@ -289,7 +289,7 @@ mod term {
         collections::HashSet,
         io::Write,
         sync::{
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
             Mutex,
         },
         thread::panicking,
@@ -329,11 +329,11 @@ mod term {
         reading: AtomicBool,
     }
 
-    static RAW_MODE: AtomicBool = AtomicBool::new(false);
+    static WINDOWS: AtomicUsize = AtomicUsize::new(0);
 
     impl Drop for StdioTerm {
         fn drop(&mut self) {
-            if RAW_MODE.swap(false, Ordering::Relaxed) {
+            if WINDOWS.fetch_sub(1, Ordering::AcqRel) == 1 {
                 let result = disable_raw_mode();
                 if !panicking() {
                     result.unwrap();
@@ -343,10 +343,7 @@ mod term {
     }
 
     fn ensure_raw() {
-        if RAW_MODE
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-            .is_err()
-        {
+        if WINDOWS.fetch_add(1, Ordering::AcqRel) != 0 {
             return;
         }
         enable_raw_mode().unwrap();
