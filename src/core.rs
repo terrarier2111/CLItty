@@ -246,7 +246,7 @@ pub enum CommandParamTy {
 impl CommandParamTy {
     fn check_fully(
         &self,
-        name: &str,
+        name: &'static str,
         iter: &mut PeekEnum<core::slice::Iter<'_, &str>>,
         raw_cmd: &String,
     ) -> Result<(), InputError> {
@@ -280,7 +280,7 @@ impl CommandParamTy {
                         }
                     }
                     return Err(InputError::ParamInvalidError(ParamInvalidError {
-                        name: name.to_string(),
+                        name: name,
                         kind: ParamInvalidErrorKind::EnumInvalidVariant(
                             constr.values().clone(),
                             raw_val.to_string(),
@@ -312,7 +312,7 @@ impl CommandParamTy {
         }
     }
 
-    pub fn validate(&self, input: &str, param_name: &str) -> Result<(), ParamInvalidError> {
+    pub fn validate(&self, input: &str, param_name: &'static str) -> Result<(), ParamInvalidError> {
         match self {
             CommandParamTy::Int(constraints) => {
                 let num = input.parse::<isize>();
@@ -321,7 +321,7 @@ impl CommandParamTy {
                         CmdParamNumConstraints::Range(range) => {
                             if range.start > num || range.end < num {
                                 Err(ParamInvalidError {
-                                    name: param_name.to_string(),
+                                    name: param_name,
                                     kind: ParamInvalidErrorKind::IntOOB(range.clone(), num),
                                 })
                             } else {
@@ -331,7 +331,7 @@ impl CommandParamTy {
                         CmdParamNumConstraints::Variants(variants) => {
                             if !variants.iter().any(|variant| *variant == num) {
                                 Err(ParamInvalidError {
-                                    name: param_name.to_string(),
+                                    name: param_name,
                                     kind: ParamInvalidErrorKind::IntInvalidVariant(&variants, num),
                                 })
                             } else {
@@ -341,7 +341,7 @@ impl CommandParamTy {
                         CmdParamNumConstraints::None => Ok(()),
                     },
                     Err(_) => Err(ParamInvalidError {
-                        name: param_name.to_string(),
+                        name: param_name,
                         kind: ParamInvalidErrorKind::NoNum(input.to_string()),
                     }),
                 }
@@ -353,7 +353,7 @@ impl CommandParamTy {
                         CmdParamNumConstraints::Range(range) => {
                             if range.start > num || range.end < num {
                                 Err(ParamInvalidError {
-                                    name: param_name.to_string(),
+                                    name: param_name,
                                     kind: ParamInvalidErrorKind::UIntOOB(range.clone(), num),
                                 })
                             } else {
@@ -363,7 +363,7 @@ impl CommandParamTy {
                         CmdParamNumConstraints::Variants(variants) => {
                             if !variants.iter().any(|variant| *variant == num) {
                                 Err(ParamInvalidError {
-                                    name: param_name.to_string(),
+                                    name: param_name,
                                     kind: ParamInvalidErrorKind::UIntInvalidVariant(&variants, num),
                                 })
                             } else {
@@ -373,7 +373,7 @@ impl CommandParamTy {
                         CmdParamNumConstraints::None => Ok(()),
                     },
                     Err(_) => Err(ParamInvalidError {
-                        name: param_name.to_string(),
+                        name: param_name,
                         kind: ParamInvalidErrorKind::NoNum(input.to_string()),
                     }),
                 }
@@ -385,7 +385,7 @@ impl CommandParamTy {
                         CmdParamDecimalConstraints::Range(range) => {
                             if num < range.start || num > range.end {
                                 Err(ParamInvalidError {
-                                    name: param_name.to_string(),
+                                    name: param_name,
                                     kind: ParamInvalidErrorKind::DecimalOOB(range.clone(), num),
                                 })
                             } else {
@@ -395,19 +395,32 @@ impl CommandParamTy {
                         CmdParamDecimalConstraints::None => Ok(()),
                     },
                     Err(_) => Err(ParamInvalidError {
-                        name: param_name.to_string(),
+                        name: param_name,
                         kind: ParamInvalidErrorKind::NoDecimal(input.to_string()),
                     }),
                 }
             }
             CommandParamTy::String(constraints) => match constraints {
-                CmdParamStrConstraints::Range(range) => {
+                CmdParamStrConstraints::Length(range) => {
                     if range.start > input.len() || range.end < input.len() {
                         Err(ParamInvalidError {
-                            name: param_name.to_string(),
+                            name: param_name,
                             kind: ParamInvalidErrorKind::StringInvalidLen(
                                 range.clone(),
                                 input.len(),
+                            ),
+                        })
+                    } else {
+                        Ok(())
+                    }
+                }
+                CmdParamStrConstraints::Contains(val) => {
+                    if !input.contains(val) {
+                        Err(ParamInvalidError {
+                            name: param_name,
+                            kind: ParamInvalidErrorKind::StringNotContaining(
+                                val,
+                                input.to_string(),
                             ),
                         })
                     } else {
@@ -428,11 +441,31 @@ impl CommandParamTy {
                     };
                     if !valid {
                         Err(ParamInvalidError {
-                            name: param_name.to_string(),
+                            name: param_name,
                             kind: ParamInvalidErrorKind::StringInvalidVariant(
                                 variants,
                                 input.to_string(),
                             ),
+                        })
+                    } else {
+                        Ok(())
+                    }
+                }
+                CmdParamStrConstraints::StartsWith(val) => {
+                    if !input.contains(val) {
+                        Err(ParamInvalidError {
+                            name: param_name,
+                            kind: ParamInvalidErrorKind::StringNotStarting(val, input.to_string()),
+                        })
+                    } else {
+                        Ok(())
+                    }
+                }
+                CmdParamStrConstraints::EndsWith(val) => {
+                    if !input.contains(val) {
+                        Err(ParamInvalidError {
+                            name: param_name,
+                            kind: ParamInvalidErrorKind::StringNotEnding(val, input.to_string()),
                         })
                     } else {
                         Ok(())
@@ -446,7 +479,7 @@ impl CommandParamTy {
                         .any(|variant| variant.0.eq_ignore_ascii_case(input))
                     {
                         Err(ParamInvalidError {
-                            name: param_name.to_string(),
+                            name: param_name,
                             kind: ParamInvalidErrorKind::EnumInvalidVariant(
                                 variants.clone(),
                                 input.to_string(),
@@ -459,7 +492,7 @@ impl CommandParamTy {
                 CmdParamEnumConstraints::Exact(variants) => {
                     if !variants.iter().any(|variant| variant.0 == input) {
                         Err(ParamInvalidError {
-                            name: param_name.to_string(),
+                            name: param_name,
                             kind: ParamInvalidErrorKind::EnumInvalidVariant(
                                 variants.clone(),
                                 input.to_string(),
@@ -521,9 +554,12 @@ impl CommandParamTy {
                 CmdParamDecimalConstraints::None => String::from("decimal"),
             },
             CommandParamTy::String(constraints) => match constraints {
-                CmdParamStrConstraints::Range(range) => {
+                CmdParamStrConstraints::Length(range) => {
                     format!("string(length {} to {})", range.start, range.end)
                 }
+                CmdParamStrConstraints::Contains(val) => format!("string(with {val})"),
+                CmdParamStrConstraints::StartsWith(val) => format!("string({val}%val%)"),
+                CmdParamStrConstraints::EndsWith(val) => format!("string(%val%{val})"),
                 CmdParamStrConstraints::None => String::from("string"),
                 CmdParamStrConstraints::Variants { variants, .. } => {
                     let mut str = String::new();
@@ -581,7 +617,7 @@ impl CommandParamTy {
 }
 
 pub struct ParamInvalidError {
-    name: String,
+    name: &'static str,
     kind: ParamInvalidErrorKind,
 }
 
@@ -703,6 +739,21 @@ impl Display for ParamInvalidError {
                     f.write_str(")")
                 }
             }
+            ParamInvalidErrorKind::StringNotContaining(val, input) => {
+                f.write_str(&input)?;
+                f.write_str(" does not contain ")?;
+                f.write_str(val)
+            }
+            ParamInvalidErrorKind::StringNotStarting(val, input) => {
+                f.write_str(&input)?;
+                f.write_str(" does not start with ")?;
+                f.write_str(val)
+            }
+            ParamInvalidErrorKind::StringNotEnding(val, input) => {
+                f.write_str(&input)?;
+                f.write_str(" does not end with ")?;
+                f.write_str(val)
+            }
         }
     }
 }
@@ -714,6 +765,9 @@ impl Debug for ParamInvalidError {
 }
 
 pub enum ParamInvalidErrorKind {
+    StringNotContaining(&'static str, String),
+    StringNotStarting(&'static str, String),
+    StringNotEnding(&'static str, String),
     StringInvalidLen(Range<usize>, usize),
     StringInvalidVariant(&'static [&'static str], String),
     EnumInvalidVariant(Vec<(&'static str, EnumVal)>, String),
@@ -748,11 +802,14 @@ pub enum CmdParamDecimalConstraints<T> {
 
 #[derive(Clone)]
 pub enum CmdParamStrConstraints {
-    Range(Range<usize>),
+    Length(Range<usize>),
     Variants {
         variants: &'static [&'static str],
         ignore_case: bool,
     },
+    Contains(&'static str),
+    StartsWith(&'static str),
+    EndsWith(&'static str),
     None,
 }
 
