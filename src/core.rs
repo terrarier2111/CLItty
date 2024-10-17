@@ -898,15 +898,6 @@ impl<'a> UsageBuilder<BuilderMutable> {
                 ty: CommandParamTy::Unbound { .. },
                 ..
             })
-        ) {
-            panic!("you can't append parameters after unbound parameters");
-        }
-        if matches!(
-            self.inner.req.last(),
-            Some(CommandParam {
-                ty: CommandParamTy::Unbound { .. },
-                ..
-            })
         ) || matches!(
             self.inner.opt.last(),
             Some(CommandParam {
