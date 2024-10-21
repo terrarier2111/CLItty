@@ -298,7 +298,7 @@ mod term {
 
     use crossterm::{
         cursor,
-        event::{poll, read, KeyModifiers},
+        event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers},
         style,
         terminal::{self, disable_raw_mode, enable_raw_mode},
         QueueableCommand,
@@ -417,7 +417,7 @@ mod term {
                     .unwrap();
                 lock.queue(terminal::ScrollUp(1)).unwrap();
             }
-            if self.reading.load(std::sync::atomic::Ordering::Acquire) {
+            if self.reading.load(Ordering::Acquire) {
                 lock.queue(cursor::MoveToColumn(0)).unwrap();
                 lock.queue(style::Print(&print_ctx.prompt)).unwrap();
                 lock.queue(style::Print(&print_ctx.buffer)).unwrap();
@@ -440,20 +440,20 @@ mod term {
         pub fn read_line_prompt(&self, can_leave: bool) -> Option<String> {
             let mut read_ctx = self.read.lock().unwrap();
             self.reading
-                .store(true, std::sync::atomic::Ordering::Release);
+                .store(true, Ordering::Release);
             self.reapply_prompt();
             let ret = 'ret: loop {
                 if poll(Duration::MAX).unwrap() {
                     match read().unwrap() {
-                        crossterm::event::Event::FocusGained => {}
-                        crossterm::event::Event::FocusLost => {}
-                        crossterm::event::Event::Key(ev) => {
+                        Event::FocusGained => {}
+                        Event::FocusLost => {}
+                        Event::Key(ev) => {
                             match ev.kind {
-                                crossterm::event::KeyEventKind::Press
-                                | crossterm::event::KeyEventKind::Repeat => {
+                                KeyEventKind::Press
+                                | KeyEventKind::Repeat => {
                                     let mut print_ctx = self.print.lock().unwrap();
                                     match ev.code {
-                                        crossterm::event::KeyCode::Backspace => {
+                                        KeyCode::Backspace => {
                                             if print_ctx.cursor_idx != 0 {
                                                 let cursor = print_ctx.cursor_idx;
                                                 let cursor =
@@ -480,7 +480,7 @@ mod term {
                                                 lock.flush().unwrap();
                                             }
                                         }
-                                        crossterm::event::KeyCode::Enter => {
+                                        KeyCode::Enter => {
                                             let mut lock = std::io::stdout().lock();
                                             lock.queue(terminal::ScrollUp(1)).unwrap();
                                             lock.queue(cursor::MoveToColumn(0)).unwrap();
@@ -515,7 +515,7 @@ mod term {
                                             );
                                             break 'ret Some(ret);
                                         }
-                                        crossterm::event::KeyCode::Left => {
+                                        KeyCode::Left => {
                                             if print_ctx.cursor_idx == 0 {
                                                 continue;
                                             }
@@ -529,7 +529,7 @@ mod term {
                                             std::io::stdout().queue(cursor::MoveLeft(1)).unwrap();
                                             std::io::stdout().flush().unwrap();
                                         }
-                                        crossterm::event::KeyCode::Right => {
+                                        KeyCode::Right => {
                                             if print_ctx.buffer.len() == print_ctx.cursor_idx {
                                                 continue;
                                             }
@@ -543,7 +543,7 @@ mod term {
                                             std::io::stdout().queue(cursor::MoveRight(1)).unwrap();
                                             std::io::stdout().flush().unwrap();
                                         }
-                                        crossterm::event::KeyCode::Up => {
+                                        KeyCode::Up => {
                                             if read_ctx.hist_idx == read_ctx.history.len() {
                                                 continue;
                                             }
@@ -572,7 +572,7 @@ mod term {
                                             lock.queue(style::Print(&print_ctx.buffer)).unwrap();
                                             lock.flush().unwrap();
                                         }
-                                        crossterm::event::KeyCode::Down => {
+                                        KeyCode::Down => {
                                             if read_ctx.hist_idx == 0 {
                                                 continue;
                                             }
@@ -602,13 +602,13 @@ mod term {
                                             lock.queue(style::Print(&print_ctx.buffer)).unwrap();
                                             lock.flush().unwrap();
                                         }
-                                        crossterm::event::KeyCode::Home => {}
-                                        crossterm::event::KeyCode::End => {}
-                                        crossterm::event::KeyCode::PageUp => {}
-                                        crossterm::event::KeyCode::PageDown => {}
-                                        crossterm::event::KeyCode::Tab => {}
-                                        crossterm::event::KeyCode::BackTab => {}
-                                        crossterm::event::KeyCode::Delete => {
+                                        KeyCode::Home => {}
+                                        KeyCode::End => {}
+                                        KeyCode::PageUp => {}
+                                        KeyCode::PageDown => {}
+                                        KeyCode::Tab => {}
+                                        KeyCode::BackTab => {}
+                                        KeyCode::Delete => {
                                             if print_ctx.cursor_idx == print_ctx.buffer.len() {
                                                 continue;
                                             }
@@ -627,11 +627,11 @@ mod term {
                                             .unwrap();
                                             lock.flush().unwrap();
                                         }
-                                        crossterm::event::KeyCode::Insert => {
+                                        KeyCode::Insert => {
                                             read_ctx.insert_mode = !read_ctx.insert_mode;
                                         }
-                                        crossterm::event::KeyCode::F(_) => {}
-                                        crossterm::event::KeyCode::Char(chr) => {
+                                        KeyCode::F(_) => {}
+                                        KeyCode::Char(chr) => {
                                             if chr == 'c'
                                                 && ev.modifiers.contains(KeyModifiers::CONTROL)
                                             {
@@ -674,8 +674,8 @@ mod term {
                                             .unwrap();
                                             lock.flush().unwrap();
                                         }
-                                        crossterm::event::KeyCode::Null => {}
-                                        crossterm::event::KeyCode::Esc => {
+                                        KeyCode::Null => {}
+                                        KeyCode::Esc => {
                                             // only leave the screen if we can actually do so
                                             if can_leave {
                                                 let mut lock = std::io::stdout().lock();
@@ -685,22 +685,22 @@ mod term {
                                                 return None;
                                             }
                                         }
-                                        crossterm::event::KeyCode::CapsLock => {}
-                                        crossterm::event::KeyCode::ScrollLock => {}
-                                        crossterm::event::KeyCode::NumLock => {}
-                                        crossterm::event::KeyCode::PrintScreen => {}
-                                        crossterm::event::KeyCode::Pause => {}
-                                        crossterm::event::KeyCode::Menu => {}
-                                        crossterm::event::KeyCode::KeypadBegin => {}
-                                        crossterm::event::KeyCode::Media(_) => {}
-                                        crossterm::event::KeyCode::Modifier(_) => {}
+                                        KeyCode::CapsLock => {}
+                                        KeyCode::ScrollLock => {}
+                                        KeyCode::NumLock => {}
+                                        KeyCode::PrintScreen => {}
+                                        KeyCode::Pause => {}
+                                        KeyCode::Menu => {}
+                                        KeyCode::KeypadBegin => {}
+                                        KeyCode::Media(_) => {}
+                                        KeyCode::Modifier(_) => {}
                                     }
                                 }
-                                crossterm::event::KeyEventKind::Release => {}
+                                KeyEventKind::Release => {}
                             }
                         }
-                        crossterm::event::Event::Mouse(_) => {}
-                        crossterm::event::Event::Paste(paste) => {
+                        Event::Mouse(_) => {}
+                        Event::Paste(paste) => {
                             let mut print_ctx = self.print.lock().unwrap();
                             let mut lock = std::io::stdout().lock();
                             let cursor = print_ctx.cursor_idx;
@@ -716,12 +716,12 @@ mod term {
                             .unwrap();
                             lock.flush().unwrap();
                         }
-                        crossterm::event::Event::Resize(_, _) => {}
+                        Event::Resize(_, _) => {}
                     }
                 }
             };
             self.reading
-                .store(false, std::sync::atomic::Ordering::Release);
+                .store(false, Ordering::Release);
             ret
         }
     }
