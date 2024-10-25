@@ -286,8 +286,8 @@ impl<CTX: Send + Sync> CLIBuilder<CTX> {
 
 mod term {
     use std::{
-        collections::HashSet,
-        io::Write,
+        collections::{HashMap, HashSet},
+        io::{StdoutLock, Write},
         sync::{
             atomic::{AtomicBool, AtomicUsize, Ordering},
             Mutex,
@@ -321,6 +321,8 @@ mod term {
         prompt_len: usize,
         cursor_idx: usize,
         whole_cursor_idx: usize,
+        skip_zone: usize,
+        zone_content: HashMap<usize, (String, usize)>,
     }
 
     pub struct StdioTerm {
@@ -360,6 +362,8 @@ mod term {
                     prompt,
                     cursor_idx: 0,
                     whole_cursor_idx: 0,
+                    skip_zone: 0,
+                    zone_content: HashMap::new(),
                 }),
                 read: Mutex::new(ReadCtx {
                     history: Vec::with_capacity(hist_cap),
@@ -370,6 +374,73 @@ mod term {
                 }),
                 reading: AtomicBool::new(false),
             }
+        }
+
+        pub fn push_skip(&self) -> SkipZone {
+            let mut print_lock = self.print.lock().unwrap();
+            print_lock.skip_zone += 1;
+            let mut lock = std::io::stdout().lock();
+            lock.queue(cursor::MoveToColumn(0)).unwrap();
+            lock.queue(terminal::Clear(terminal::ClearType::CurrentLine))
+                .unwrap();
+            lock.queue(terminal::ScrollUp(1)).unwrap();
+            lock.flush().unwrap();
+
+            SkipZone(print_lock.skip_zone)
+        }
+
+        pub fn pop_skip(&self, zone: SkipZone) {
+            let mut print_lock = self.print.lock().unwrap();
+            print_lock.zone_content.remove(&zone.0);
+            for entry in print_lock.zone_content.clone() {
+                let idx = {
+                    let mut idx = 0;
+                    for entry in print_lock.zone_content.iter() {
+                        if *entry.0 < zone.0 {
+                            idx += 1;
+                        }
+                    }
+                    idx
+                };
+                print_lock.zone_content.insert(entry.0, (entry.1 .0, idx));
+            }
+            let mut lock = std::io::stdout().lock();
+            lock.queue(terminal::ScrollDown(1)).unwrap();
+            for entry in print_lock.zone_content.iter() {
+                lock.queue(cursor::MoveToRow(entry.1 .1 as u16)).unwrap();
+                lock.queue(cursor::MoveToColumn(0)).unwrap();
+                lock.queue(style::Print(entry.1 .0.clone())).unwrap();
+            }
+            lock.queue(cursor::MoveToRow(0)).unwrap();
+            let print_ctx = self.print.lock().unwrap();
+            self.reapply_prompt_inner_raw(
+                &print_ctx.prompt,
+                &print_ctx.buffer,
+                print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16,
+                &mut lock,
+            );
+            lock.flush().unwrap();
+        }
+
+        pub fn set_zone(&self, zone: SkipZone, val: String) {
+            let mut lock = self.print.lock().unwrap();
+            let idx = {
+                let mut idx = 0;
+                for entry in lock.zone_content.iter() {
+                    if *entry.0 < zone.0 {
+                        idx += 1;
+                    }
+                }
+                idx
+            };
+            lock.zone_content.insert(zone.0, (val.clone(), idx));
+            let mut lock = std::io::stdout().lock();
+            lock.queue(cursor::MoveToRow(idx as u16)).unwrap();
+            lock.queue(cursor::MoveToColumn(0)).unwrap();
+            lock.queue(style::Print(val)).unwrap();
+            lock.queue(cursor::MoveToRow(0)).unwrap();
+            lock.queue(cursor::MoveToColumn(0)).unwrap();
+            lock.flush().unwrap();
         }
 
         pub fn set_prompt(&self, prompt: String) {
@@ -395,6 +466,23 @@ mod term {
 
         fn reapply_prompt_inner(&self, prompt: &String, buffer: &String, column: u16) {
             let mut lock = std::io::stdout().lock();
+            lock.queue(cursor::MoveToColumn(0)).unwrap();
+            lock.queue(terminal::Clear(terminal::ClearType::UntilNewLine))
+                .unwrap();
+            lock.queue(cursor::MoveToColumn(0)).unwrap();
+            lock.queue(style::Print(prompt)).unwrap();
+            lock.queue(style::Print(buffer)).unwrap();
+            lock.queue(cursor::MoveToColumn(column)).unwrap();
+            lock.flush().unwrap();
+        }
+
+        fn reapply_prompt_inner_raw(
+            &self,
+            prompt: &String,
+            buffer: &String,
+            column: u16,
+            lock: &mut StdoutLock<'static>,
+        ) {
             lock.queue(cursor::MoveToColumn(0)).unwrap();
             lock.queue(terminal::Clear(terminal::ClearType::UntilNewLine))
                 .unwrap();
@@ -439,8 +527,7 @@ mod term {
 
         pub fn read_line_prompt(&self, can_leave: bool) -> Option<String> {
             let mut read_ctx = self.read.lock().unwrap();
-            self.reading
-                .store(true, Ordering::Release);
+            self.reading.store(true, Ordering::Release);
             self.reapply_prompt();
             let ret = 'ret: loop {
                 if poll(Duration::MAX).unwrap() {
@@ -449,8 +536,7 @@ mod term {
                         Event::FocusLost => {}
                         Event::Key(ev) => {
                             match ev.kind {
-                                KeyEventKind::Press
-                                | KeyEventKind::Repeat => {
+                                KeyEventKind::Press | KeyEventKind::Repeat => {
                                     let mut print_ctx = self.print.lock().unwrap();
                                     match ev.code {
                                         KeyCode::Backspace => {
@@ -720,11 +806,12 @@ mod term {
                     }
                 }
             };
-            self.reading
-                .store(false, Ordering::Release);
+            self.reading.store(false, Ordering::Release);
             ret
         }
     }
+
+    pub struct SkipZone(usize);
 }
 
 #[inline]
