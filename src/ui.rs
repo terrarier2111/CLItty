@@ -105,7 +105,7 @@ impl<CTX: Send + Sync> Window<CTX> {
     }
 
     pub fn await_input(&self, ctx: &CTX, can_close: bool) -> Option<anyhow::Result<bool>> {
-        let input = self.term.read_line_prompt(can_close);
+        let input = self.term.read_line_prompt(can_close, &self.core);
         if input.is_none() {
             return None;
         }
@@ -304,6 +304,8 @@ mod term {
         QueueableCommand,
     };
     use strip_ansi_escapes::strip_str;
+
+    use crate::core::CLICore;
 
     use super::{char_size, char_start};
 
@@ -525,7 +527,7 @@ mod term {
             self.println_inner::<true>(val)
         }
 
-        pub fn read_line_prompt(&self, can_leave: bool) -> Option<String> {
+        pub fn read_line_prompt<C>(&self, can_leave: bool, core: &CLICore<C>) -> Option<String> {
             let mut read_ctx = self.read.lock().unwrap();
             self.reading.store(true, Ordering::Release);
             self.reapply_prompt();
@@ -692,7 +694,15 @@ mod term {
                                         KeyCode::End => {}
                                         KeyCode::PageUp => {}
                                         KeyCode::PageDown => {}
-                                        KeyCode::Tab => {}
+                                        KeyCode::Tab => {
+                                            let curr = &print_ctx.buffer;
+                                            if curr.is_empty() {
+                                                continue;
+                                            }
+                                            if let Some(completed) = core.complete(&curr, true) {
+                                                print_ctx.buffer = completed;
+                                            }
+                                        }
                                         KeyCode::BackTab => {}
                                         KeyCode::Delete => {
                                             if print_ctx.cursor_idx == print_ctx.buffer.len() {

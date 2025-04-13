@@ -1,7 +1,7 @@
 use std::collections::hash_map::Iter;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Display, Formatter, Write};
 use std::marker::PhantomData;
 use std::mem::{self, transmute};
 use std::num::NonZeroUsize;
@@ -31,6 +31,16 @@ impl<C> CLICore<C> {
             cmds: Arc::new(cmds),
             cmd_cnt,
         }
+    }
+
+    pub fn complete(&self, input: &str, ignore_case: bool) -> Option<String> {
+        for command in self.cmds.iter() {
+            if (!ignore_case && command.0.starts_with(input)) || (ignore_case && command.0.to_lowercase().starts_with(&input.to_lowercase())) {
+                // TODO: support command specific completion
+                return Some(command.0.to_string());
+            }
+        }
+        None
     }
 
     pub fn process(&self, ctx: &C, input: &str) -> Result<(), InputError> {
@@ -627,20 +637,18 @@ impl Display for ParamInvalidError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
             ParamInvalidErrorKind::StringInvalidLen(range, val) => {
+                Display::fmt(&val, f)?;
                 if *val > range.end {
-                    f.write_str(val.to_string().as_str())?;
                     f.write_str(" is too long for parameter (max len: ")?;
-                    f.write_str(range.end.to_string().as_str())?;
-                    f.write_str(")")
+                    Display::fmt(&range.end, f)?;
                 } else {
-                    f.write_str(val.to_string().as_str())?;
                     f.write_str(" is too short for parameter (min len: ")?;
-                    f.write_str(range.start.to_string().as_str())?;
-                    f.write_str(")")
+                    Display::fmt(&range.start, f)?;
                 }
+                f.write_char(')')
             }
             ParamInvalidErrorKind::StringInvalidVariant(variants, val) => {
-                f.write_str(val.as_str())?;
+                f.write_str(&val)?;
                 f.write_str(" is not one of the valid variants (")?;
                 for (idx, variant) in variants.iter().enumerate() {
                     f.write_str(variant)?;
@@ -653,7 +661,7 @@ impl Display for ParamInvalidError {
             }
             ParamInvalidErrorKind::EnumInvalidVariant(variants, val) => {
                 // TODO: improve this printing
-                f.write_str(val.to_string().as_str())?;
+                f.write_str(&val)?;
                 f.write_str(" is not one of the valid variants (")?;
                 for (idx, variant) in variants.iter().enumerate() {
                     f.write_str(variant.0)?;
@@ -671,20 +679,18 @@ impl Display for ParamInvalidError {
                 f.write_str(" has to be a whole number")
             }
             ParamInvalidErrorKind::IntOOB(range, val) => {
+                Display::fmt(&val, f)?;
                 if *val > range.end {
-                    f.write_str(val.to_string().as_str())?;
                     f.write_str(" is too large for parameter (max: ")?;
-                    f.write_str(range.end.to_string().as_str())?;
-                    f.write_str(")")
+                    Display::fmt(&range.end, f)?;
                 } else {
-                    f.write_str(val.to_string().as_str())?;
                     f.write_str(" is too short for parameter (min len: ")?;
-                    f.write_str(range.start.to_string().as_str())?;
-                    f.write_str(")")
+                    Display::fmt(&range.start, f)?;
                 }
+                f.write_char(')')
             }
             ParamInvalidErrorKind::IntInvalidVariant(variants, val) => {
-                f.write_str(val.to_string().as_str())?;
+                Display::fmt(&val, f)?;
                 f.write_str(" is not one of the valid variants (")?;
                 for (idx, variant) in variants.iter().enumerate() {
                     f.write_str(variant.to_string().as_str())?;
@@ -696,17 +702,15 @@ impl Display for ParamInvalidError {
                 f.write_str(&self.name)
             }
             ParamInvalidErrorKind::UIntOOB(range, val) => {
+                Display::fmt(&val, f)?;
                 if *val > range.end {
-                    f.write_str(val.to_string().as_str())?;
                     f.write_str(" is too large for parameter (max: ")?;
-                    f.write_str(range.end.to_string().as_str())?;
-                    f.write_str(")")
+                    Display::fmt(&range.end, f)?;
                 } else {
-                    f.write_str(val.to_string().as_str())?;
                     f.write_str(" is too short for parameter (min len: ")?;
-                    f.write_str(range.start.to_string().as_str())?;
-                    f.write_str(")")
+                    Display::fmt(&range.start, f)?;
                 }
+                f.write_char(')')
             }
             ParamInvalidErrorKind::UIntInvalidVariant(variants, val) => {
                 f.write_str(val.to_string().as_str())?;
@@ -727,17 +731,15 @@ impl Display for ParamInvalidError {
                 f.write_str(" has to be a decimal number")
             }
             ParamInvalidErrorKind::DecimalOOB(range, val) => {
+                Display::fmt(&val, f)?;
                 if *val > range.end {
-                    f.write_str(val.to_string().as_str())?;
                     f.write_str(" is too large for parameter (max: ")?;
-                    f.write_str(range.end.to_string().as_str())?;
-                    f.write_str(")")
+                    Display::fmt(&range.end, f)?;
                 } else {
-                    f.write_str(val.to_string().as_str())?;
                     f.write_str(" is too short for parameter (min len: ")?;
-                    f.write_str(range.start.to_string().as_str())?;
-                    f.write_str(")")
+                    Display::fmt(&range.start, f)?;
                 }
+                f.write_char(')')
             }
             ParamInvalidErrorKind::StringNotContaining(val, input) => {
                 f.write_str(&input)?;
@@ -1025,7 +1027,7 @@ impl<'a, C: 'static> Iterator for CommandIter<'a, C> {
         loop {
             match self.inner.next() {
                 Some(val) => {
-                    if val.1 .0 {
+                    if val.1.0 {
                         return Some(val.1 .1.as_ref());
                     }
                 }
