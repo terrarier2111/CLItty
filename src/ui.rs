@@ -721,7 +721,7 @@ mod term {
                                                 continue;
                                             }
                                             if let Some(completed) = core.complete(&curr, true, &mut CompletionCtx::default()) {
-                                                for chr in completed.chars() {
+                                                for chr in (&completed[curr.len()..]).chars() {
                                                     self.handle_char_input(chr, &read_ctx, &mut print_ctx);
                                                 }
                                             }
