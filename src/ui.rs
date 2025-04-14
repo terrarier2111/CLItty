@@ -277,7 +277,7 @@ impl<CTX: Send + Sync> CLIBuilder<CTX> {
             fallback: self
                 .fallback
                 .expect("a fallback has to be specified before a CLI can be built"),
-            term: StdioTerm::new(prompt, None, 10),
+            term: StdioTerm::new(prompt, None, 10).expect("can't build stdio terminal"),
             core: CLICore::new(self.cmds),
             on_close: self.on_close.unwrap_or_else(|| Box::new(|_| {})),
         }
@@ -296,6 +296,7 @@ mod term {
         time::Duration,
     };
 
+    use crossbeam_utils::Backoff;
     use crossterm::{
         cursor,
         event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -307,7 +308,7 @@ mod term {
 
     use crate::core::CLICore;
 
-    use super::{char_size, char_start};
+    use super::{char_size, char_start, flatten_result};
 
     struct ReadCtx {
         history: Vec<String>,
@@ -333,12 +334,16 @@ mod term {
         reading: AtomicBool,
     }
 
+    const SWITCHING_MODE_BIT: usize = 1 << (usize::BITS - 1) as usize;
+
     static WINDOWS: AtomicUsize = AtomicUsize::new(0);
 
     impl Drop for StdioTerm {
         fn drop(&mut self) {
-            if WINDOWS.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let windows = WINDOWS.fetch_sub(1, Ordering::AcqRel);
+            if windows & !SWITCHING_MODE_BIT == 1 {
                 let result = disable_raw_mode();
+                WINDOWS.fetch_and(!SWITCHING_MODE_BIT, Ordering::AcqRel);
                 if !panicking() {
                     result.unwrap();
                 }
@@ -346,18 +351,29 @@ mod term {
         }
     }
 
-    fn ensure_raw() {
-        if WINDOWS.fetch_add(1, Ordering::AcqRel) != 0 {
-            return;
+    fn ensure_raw() -> anyhow::Result<()> {
+        let windows = WINDOWS.fetch_add(1, Ordering::AcqRel);
+        if windows == 0 {
+            WINDOWS.fetch_or(SWITCHING_MODE_BIT, Ordering::AcqRel);
         }
-        enable_raw_mode().unwrap();
+        if windows & !SWITCHING_MODE_BIT != 0 {
+            return Ok(());
+        }
+        if windows & SWITCHING_MODE_BIT != 0 {
+            let back_off = Backoff::new();
+            while WINDOWS.load(Ordering::Acquire) & SWITCHING_MODE_BIT != 0 {
+                back_off.snooze();
+            }
+        }
+        enable_raw_mode()?;
+        Ok(())
     }
 
     impl StdioTerm {
-        pub fn new(prompt: String, allowed_chars: Option<HashSet<char>>, hist_cap: usize) -> Self {
-            ensure_raw();
+        pub fn new(prompt: String, allowed_chars: Option<HashSet<char>>, hist_cap: usize) -> anyhow::Result<Self> {
+            ensure_raw()?;
             let truncated = strip_str(&prompt).chars().count();
-            Self {
+            Ok(Self {
                 print: Mutex::new(PrintCtx {
                     buffer: String::new(),
                     prompt_len: truncated,
@@ -375,7 +391,7 @@ mod term {
                     interm_hist_buffer: String::new(),
                 }),
                 reading: AtomicBool::new(false),
-            }
+            })
         }
 
         pub fn push_skip(&self) -> SkipZone {
@@ -728,47 +744,29 @@ mod term {
                                         }
                                         KeyCode::F(_) => {}
                                         KeyCode::Char(chr) => {
-                                            if chr == 'c'
-                                                && ev.modifiers.contains(KeyModifiers::CONTROL)
-                                            {
-                                                let mut lock = std::io::stdout().lock();
-                                                if can_leave {
-                                                    lock.queue(terminal::LeaveAlternateScreen)
-                                                        .unwrap();
+                                            if ev.modifiers.contains(KeyModifiers::CONTROL) {
+                                                if chr == 'v' {
+                                                    let text = flatten_result(arboard::Clipboard::new().map(|mut clipboard| clipboard.get_text()));
+                                                    if let Ok(text) = text {
+                                                        for chr in text.chars() {
+                                                            self.handle_char_input(chr, &read_ctx, &mut print_ctx);
+                                                        }
+                                                    }
+                                                } else if chr == 'c' {
+                                                    let mut lock = std::io::stdout().lock();
+                                                    if can_leave {
+                                                        lock.queue(terminal::LeaveAlternateScreen)
+                                                            .unwrap();
+                                                    }
+                                                    lock.queue(terminal::ScrollUp(1)).unwrap();
+                                                    lock.queue(cursor::MoveToColumn(0)).unwrap();
+                                                    lock.flush().unwrap();
+                                                    disable_raw_mode().unwrap();
+                                                    std::process::exit(0);
                                                 }
-                                                lock.queue(terminal::ScrollUp(1)).unwrap();
-                                                lock.queue(cursor::MoveToColumn(0)).unwrap();
-                                                lock.flush().unwrap();
-                                                disable_raw_mode().unwrap();
-                                                std::process::exit(0);
+                                                continue;
                                             }
-                                            if let Some(allowed_chars) =
-                                                read_ctx.allowed_chars.as_ref()
-                                            {
-                                                if !allowed_chars.contains(&chr) {
-                                                    // character not allowed
-                                                    continue;
-                                                }
-                                            }
-                                            let cursor = print_ctx.cursor_idx;
-                                            if !read_ctx.insert_mode
-                                                && print_ctx.cursor_idx != print_ctx.buffer.len()
-                                            {
-                                                print_ctx.buffer.remove(cursor);
-                                            }
-                                            print_ctx.buffer.insert(cursor, chr);
-                                            print_ctx.cursor_idx += char_size(chr);
-                                            print_ctx.whole_cursor_idx += 1;
-                                            let mut lock = std::io::stdout().lock();
-                                            lock.queue(cursor::MoveToColumn(0)).unwrap();
-                                            lock.queue(style::Print(&print_ctx.prompt)).unwrap();
-                                            lock.queue(style::Print(&print_ctx.buffer)).unwrap();
-                                            lock.queue(cursor::MoveToColumn(
-                                                print_ctx.prompt_len as u16
-                                                    + print_ctx.whole_cursor_idx as u16,
-                                            ))
-                                            .unwrap();
-                                            lock.flush().unwrap();
+                                            self.handle_char_input(chr, &read_ctx, &mut print_ctx);
                                         }
                                         KeyCode::Null => {}
                                         KeyCode::Esc => {
@@ -819,6 +817,36 @@ mod term {
             self.reading.store(false, Ordering::Release);
             ret
         }
+
+        fn handle_char_input(&self, chr: char, read_ctx: &ReadCtx, print_ctx: &mut PrintCtx) {
+            if let Some(allowed_chars) =
+                                                read_ctx.allowed_chars.as_ref()
+                                            {
+                                                if !allowed_chars.contains(&chr) {
+                                                    // character not allowed
+                                                    return;
+                                                }
+                                            }
+                                            let cursor = print_ctx.cursor_idx;
+                                            if !read_ctx.insert_mode
+                                                && print_ctx.cursor_idx != print_ctx.buffer.len()
+                                            {
+                                                print_ctx.buffer.remove(cursor);
+                                            }
+                                            print_ctx.buffer.insert(cursor, chr);
+                                            print_ctx.cursor_idx += char_size(chr);
+                                            print_ctx.whole_cursor_idx += 1;
+                                            let mut lock = std::io::stdout().lock();
+                                            lock.queue(cursor::MoveToColumn(0)).unwrap();
+                                            lock.queue(style::Print(&print_ctx.prompt)).unwrap();
+                                            lock.queue(style::Print(&print_ctx.buffer)).unwrap();
+                                            lock.queue(cursor::MoveToColumn(
+                                                print_ctx.prompt_len as u16
+                                                    + print_ctx.whole_cursor_idx as u16,
+                                            ))
+                                            .unwrap();
+                                            lock.flush().unwrap();
+        }
     }
 
     pub struct SkipZone(usize);
@@ -856,4 +884,10 @@ fn char_size(chr: char) -> usize {
         4
     }
     // ((chr as u32).trailing_ones() as usize).max(1)
+}
+
+// TODO: remove this, once result flattening becomes stable!
+#[inline]
+fn flatten_result<T, E>(res: Result<Result<T, E>, E>) -> Result<T, E> {
+    res?
 }
