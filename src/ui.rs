@@ -721,7 +721,9 @@ mod term {
                                                 continue;
                                             }
                                             if let Some(completed) = core.complete(&curr, true, &mut CompletionCtx::default()) {
-                                                print_ctx.buffer = completed;
+                                                for chr in completed.chars() {
+                                                    self.handle_char_input(chr, &read_ctx, &mut print_ctx);
+                                                }
                                             }
                                         }
                                         KeyCode::BackTab => {}
