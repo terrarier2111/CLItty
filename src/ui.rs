@@ -306,7 +306,7 @@ mod term {
     };
     use strip_ansi_escapes::strip_str;
 
-    use crate::core::CLICore;
+    use crate::core::{CLICore, CompletionCtx};
 
     use super::{char_size, char_start, flatten_result};
 
@@ -370,7 +370,11 @@ mod term {
     }
 
     impl StdioTerm {
-        pub fn new(prompt: String, allowed_chars: Option<HashSet<char>>, hist_cap: usize) -> anyhow::Result<Self> {
+        pub fn new(
+            prompt: String,
+            allowed_chars: Option<HashSet<char>>,
+            hist_cap: usize,
+        ) -> anyhow::Result<Self> {
             ensure_raw()?;
             let truncated = strip_str(&prompt).chars().count();
             Ok(Self {
@@ -711,11 +715,12 @@ mod term {
                                         KeyCode::PageUp => {}
                                         KeyCode::PageDown => {}
                                         KeyCode::Tab => {
+                                            // FIXME: properly implement completion context and use cursor position to determine which parts to complete
                                             let curr = &print_ctx.buffer;
                                             if curr.is_empty() {
                                                 continue;
                                             }
-                                            if let Some(completed) = core.complete(&curr, true) {
+                                            if let Some(completed) = core.complete(&curr, true, &mut CompletionCtx::default()) {
                                                 print_ctx.buffer = completed;
                                             }
                                         }
@@ -746,10 +751,18 @@ mod term {
                                         KeyCode::Char(chr) => {
                                             if ev.modifiers.contains(KeyModifiers::CONTROL) {
                                                 if chr == 'v' {
-                                                    let text = flatten_result(arboard::Clipboard::new().map(|mut clipboard| clipboard.get_text()));
+                                                    let text = flatten_result(
+                                                        arboard::Clipboard::new().map(
+                                                            |mut clipboard| clipboard.get_text(),
+                                                        ),
+                                                    );
                                                     if let Ok(text) = text {
                                                         for chr in text.chars() {
-                                                            self.handle_char_input(chr, &read_ctx, &mut print_ctx);
+                                                            self.handle_char_input(
+                                                                chr,
+                                                                &read_ctx,
+                                                                &mut print_ctx,
+                                                            );
                                                         }
                                                     }
                                                 } else if chr == 'c' {
@@ -819,33 +832,28 @@ mod term {
         }
 
         fn handle_char_input(&self, chr: char, read_ctx: &ReadCtx, print_ctx: &mut PrintCtx) {
-            if let Some(allowed_chars) =
-                                                read_ctx.allowed_chars.as_ref()
-                                            {
-                                                if !allowed_chars.contains(&chr) {
-                                                    // character not allowed
-                                                    return;
-                                                }
-                                            }
-                                            let cursor = print_ctx.cursor_idx;
-                                            if !read_ctx.insert_mode
-                                                && print_ctx.cursor_idx != print_ctx.buffer.len()
-                                            {
-                                                print_ctx.buffer.remove(cursor);
-                                            }
-                                            print_ctx.buffer.insert(cursor, chr);
-                                            print_ctx.cursor_idx += char_size(chr);
-                                            print_ctx.whole_cursor_idx += 1;
-                                            let mut lock = std::io::stdout().lock();
-                                            lock.queue(cursor::MoveToColumn(0)).unwrap();
-                                            lock.queue(style::Print(&print_ctx.prompt)).unwrap();
-                                            lock.queue(style::Print(&print_ctx.buffer)).unwrap();
-                                            lock.queue(cursor::MoveToColumn(
-                                                print_ctx.prompt_len as u16
-                                                    + print_ctx.whole_cursor_idx as u16,
-                                            ))
-                                            .unwrap();
-                                            lock.flush().unwrap();
+            if let Some(allowed_chars) = read_ctx.allowed_chars.as_ref() {
+                if !allowed_chars.contains(&chr) {
+                    // character not allowed
+                    return;
+                }
+            }
+            let cursor = print_ctx.cursor_idx;
+            if !read_ctx.insert_mode && print_ctx.cursor_idx != print_ctx.buffer.len() {
+                print_ctx.buffer.remove(cursor);
+            }
+            print_ctx.buffer.insert(cursor, chr);
+            print_ctx.cursor_idx += char_size(chr);
+            print_ctx.whole_cursor_idx += 1;
+            let mut lock = std::io::stdout().lock();
+            lock.queue(cursor::MoveToColumn(0)).unwrap();
+            lock.queue(style::Print(&print_ctx.prompt)).unwrap();
+            lock.queue(style::Print(&print_ctx.buffer)).unwrap();
+            lock.queue(cursor::MoveToColumn(
+                print_ctx.prompt_len as u16 + print_ctx.whole_cursor_idx as u16,
+            ))
+            .unwrap();
+            lock.flush().unwrap();
         }
     }
 

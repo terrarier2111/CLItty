@@ -22,10 +22,10 @@ impl<C> CLICore<C> {
         for mut cmd in commands.into_iter() {
             let aliases = mem::take(&mut cmd.aliases);
             let cmd = Rc::new(cmd.build());
-            cmds.insert(cmd.name.clone(), (true, cmd.clone()));
             for alias in aliases {
                 cmds.insert(alias, (false, cmd.clone()));
             }
+            cmds.insert(cmd.name.clone(), (true, cmd));
         }
         Self {
             cmds: Arc::new(cmds),
@@ -33,14 +33,29 @@ impl<C> CLICore<C> {
         }
     }
 
-    pub fn complete(&self, input: &str, ignore_case: bool) -> Option<String> {
-        for command in self.cmds.iter() {
-            if (!ignore_case && command.0.starts_with(input)) || (ignore_case && command.0.to_lowercase().starts_with(&input.to_lowercase())) {
-                // TODO: support command specific completion
-                return Some(command.0.to_string());
-            }
+    pub(crate) fn complete(&self, raw_input: &str, ignore_case: bool, completion_ctx: &mut CompletionCtx) -> Option<String> {
+        let input = raw_input.split(' ').collect::<Vec<_>>();
+        if input.is_empty() {
+            return None;
         }
-        None
+        if input.len() == 1 {
+            if &completion_ctx.input != raw_input {
+                completion_ctx.input = raw_input.to_string();
+                completion_ctx.iter_idx = 0;
+            }
+            for (i, command) in self.cmds.iter().skip(completion_ctx.iter_idx).enumerate() {
+                if (!ignore_case && command.0.starts_with(input[0]))
+                    || (ignore_case && command.0.to_lowercase().starts_with(&input[0].to_lowercase()))
+                {
+                    completion_ctx.iter_idx = (completion_ctx.iter_idx + i + 1) % self.cmds.len();
+                    return Some(command.0.to_string());
+                }
+            }
+            return None;
+        }
+        let name = input[0].to_lowercase();
+        let command = self.cmds.get(&name);
+        command.map(|cmd| cmd.1.cmd_impl.complete(&input[1..])).flatten()
     }
 
     pub fn process(&self, ctx: &C, input: &str) -> Result<(), InputError> {
@@ -92,8 +107,17 @@ impl<C> CLICore<C> {
     }
 }
 
+/// SAFETY:
+/// This is safe as we only use the Rcs internally and we know that all references
+/// to the Rc objects must always be held by the same thread.
 unsafe impl<C> Send for CLICore<C> {}
 unsafe impl<C> Sync for CLICore<C> {}
+
+#[derive(Default)]
+pub struct CompletionCtx {
+    input: String,
+    iter_idx: usize,
+}
 
 pub enum InputError {
     ArgumentCnt {
@@ -172,6 +196,10 @@ pub trait CommandImpl: Send + Sync {
     type CTX;
 
     fn execute(&self, ctx: &Self::CTX, input: &[&str]) -> anyhow::Result<()>;
+
+    fn complete(&self, _input: &[&str]) -> Option<String> {
+        None
+    }
 }
 
 pub struct CommandBuilder<C> {
@@ -1027,7 +1055,7 @@ impl<'a, C: 'static> Iterator for CommandIter<'a, C> {
         loop {
             match self.inner.next() {
                 Some(val) => {
-                    if val.1.0 {
+                    if val.1 .0 {
                         return Some(val.1 .1.as_ref());
                     }
                 }
