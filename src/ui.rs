@@ -221,8 +221,13 @@ impl<CTX: Send + Sync> CLIBuilder<CTX> {
     }
 
     pub fn command(mut self, cmd: CommandBuilder<CTX>) -> Self {
-        // ensure the name and aliases are unique
-        for cmd in self.cmds.iter().enumerate() {
+        self.command_inner(cmd);
+        self
+    }
+
+    fn command_inner(&mut self, cmd: CommandBuilder<CTX>) -> Self {
+         // ensure the name and aliases are unique
+         for cmd in self.cmds.iter().enumerate() {
             for other in self.cmds.iter().enumerate() {
                 if cmd.0 != other.0 {
                     if cmd.1.name == other.1.name {
@@ -254,6 +259,12 @@ impl<CTX: Send + Sync> CLIBuilder<CTX> {
             }
         }
         self.cmds.push(cmd);
+    }
+
+    pub fn commands(mut self, cmds: Vec<CommandBuilder<CTX>>) -> Self {
+        for cmd in cmds {
+            self.command_inner(cmd);
+        }
         self
     }
 
