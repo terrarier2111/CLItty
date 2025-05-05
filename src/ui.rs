@@ -106,9 +106,7 @@ impl<CTX: Send + Sync> Window<CTX> {
 
     pub fn await_input(&self, ctx: &CTX, can_close: bool) -> Option<anyhow::Result<bool>> {
         let input = self.term.read_line_prompt(can_close, &self.core);
-        if input.is_none() {
-            return None;
-        }
+        input.as_ref()?;
         let input = input.unwrap();
 
         match self.core.process(ctx, input.as_str()) {
@@ -175,7 +173,7 @@ impl<CTX: Send + Sync> Window<CTX> {
     }
 
     pub fn handle_close(&self, ctx: &CTX) {
-        (&self.on_close)(ctx);
+        (self.on_close)(ctx);
     }
 }
 
@@ -194,7 +192,7 @@ impl<CTX: Send + Sync> PrintFallback<CTX> {
 
 impl<CTX: Send + Sync> FallbackHandler<CTX> for PrintFallback<CTX> {
     fn handle(&self, _: String, window: &Window<CTX>, _: &CTX) -> anyhow::Result<bool> {
-        window.println(format!("{}", self.0).as_str());
+        window.println(self.0.to_string().as_str());
         Ok(false)
     }
 }
@@ -204,6 +202,12 @@ pub struct CLIBuilder<CTX: Send + Sync> {
     prompt: Option<String>,
     fallback: Option<Box<dyn FallbackHandler<CTX>>>,
     on_close: Option<Box<dyn Fn(&CTX) + Send + Sync>>,
+}
+
+impl<CTX: Send + Sync> Default for CLIBuilder<CTX> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<CTX: Send + Sync> CLIBuilder<CTX> {
@@ -272,7 +276,7 @@ impl<CTX: Send + Sync> CLIBuilder<CTX> {
         let prompt = self
             .prompt
             .as_ref()
-            .map_or(String::new(), |prompt| format!("{}", prompt));
+            .map_or(String::new(), |prompt| prompt.to_string());
         Window {
             fallback: self
                 .fallback
@@ -516,7 +520,7 @@ mod term {
         }
 
         fn println_inner<const ALIGNED: bool>(&self, val: &str) {
-            let input = val.split("\r\n").map(|part| part.split('\n')).flatten();
+            let input = val.split("\r\n").flat_map(|part| part.split('\n'));
             let print_ctx = self.print.lock().unwrap();
             let offset = if ALIGNED { print_ctx.prompt_len } else { 0 };
             let mut lock = std::io::stdout().lock();
@@ -567,7 +571,7 @@ mod term {
                                                 let cursor =
                                                     char_start(&print_ctx.buffer, cursor - 1);
                                                 let size = char_size(
-                                                    print_ctx.buffer.as_bytes()[cursor as usize]
+                                                    print_ctx.buffer.as_bytes()[cursor]
                                                         as char,
                                                 );
                                                 print_ctx.buffer.remove(cursor);
@@ -617,10 +621,7 @@ mod term {
                                                 }
                                             }
 
-                                            let ret = core::mem::replace(
-                                                &mut print_ctx.buffer,
-                                                String::new(),
-                                            );
+                                            let ret = std::mem::take(&mut print_ctx.buffer);
                                             break 'ret Some(ret);
                                         }
                                         KeyCode::Left => {
@@ -629,7 +630,7 @@ mod term {
                                             }
                                             let size = char_size(
                                                 print_ctx.buffer.as_bytes()
-                                                    [print_ctx.cursor_idx as usize - 1]
+                                                    [print_ctx.cursor_idx - 1]
                                                     as char,
                                             );
                                             print_ctx.cursor_idx -= size;
@@ -643,7 +644,7 @@ mod term {
                                             }
                                             let size = char_size(
                                                 print_ctx.buffer.as_bytes()
-                                                    [print_ctx.cursor_idx as usize]
+                                                    [print_ctx.cursor_idx]
                                                     as char,
                                             );
                                             print_ctx.cursor_idx += size;
@@ -691,10 +692,7 @@ mod term {
                                                     [read_ctx.history.len() - read_ctx.hist_idx]
                                                     .clone();
                                             } else {
-                                                print_ctx.buffer = core::mem::replace(
-                                                    &mut read_ctx.interm_hist_buffer,
-                                                    String::new(),
-                                                );
+                                                print_ctx.buffer = std::mem::take(&mut read_ctx.interm_hist_buffer);
                                             }
                                             print_ctx.cursor_idx = print_ctx.buffer.len();
                                             print_ctx.whole_cursor_idx =
@@ -720,8 +718,8 @@ mod term {
                                             if curr.is_empty() {
                                                 continue;
                                             }
-                                            if let Some(completed) = core.complete(&curr, true, &mut CompletionCtx::default()) {
-                                                for chr in (&completed[curr.len()..]).chars() {
+                                            if let Some(completed) = core.complete(curr, true, &mut CompletionCtx::default()) {
+                                                for chr in completed[curr.len()..].chars() {
                                                     self.handle_char_input(chr, &read_ctx, &mut print_ctx);
                                                 }
                                             }

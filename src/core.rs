@@ -55,7 +55,7 @@ impl<C> CLICore<C> {
         }
         let name = input[0].to_lowercase();
         let command = self.cmds.get(&name);
-        command.map(|cmd| cmd.1.cmd_impl.complete(&input[1..])).flatten()
+        command.and_then(|cmd| cmd.1.cmd_impl.complete(&input[1..]))
     }
 
     pub fn process(&self, ctx: &C, input: &str) -> Result<(), InputError> {
@@ -72,10 +72,10 @@ impl<C> CLICore<C> {
                 if let Some(params) = &cmd.params {
                     let mut iter = PeekEnum::new(parts.iter());
                     for req in params.required().iter() {
-                        req.ty.check_fully(&req.name, &mut iter, &raw_cmd)?;
+                        req.ty.check_fully(req.name, &mut iter, &raw_cmd)?;
                     }
                 }
-                match cmd.cmd_impl.execute(ctx, &parts) {
+                match cmd.cmd_impl.execute(ctx, parts) {
                     Ok(_) => Ok(()),
                     Err(error) => Err(InputError::ExecError {
                         name: raw_cmd,
@@ -270,8 +270,8 @@ impl CommandParam {
 
 #[derive(Clone)]
 pub enum CommandParamTy {
-    Int(CmdParamNumConstraints<isize>),
-    UInt(CmdParamNumConstraints<usize>),
+    Int(CmdParamNumConstraints<SInt>),
+    UInt(CmdParamNumConstraints<UInt>),
     Decimal(CmdParamDecimalConstraints<f64>),
     String(CmdParamStrConstraints),
     Enum(CmdParamEnumConstraints),
@@ -318,7 +318,7 @@ impl CommandParamTy {
                         }
                     }
                     return Err(InputError::ParamInvalidError(ParamInvalidError {
-                        name: name,
+                        name,
                         kind: ParamInvalidErrorKind::EnumInvalidVariant(
                             constr.values().clone(),
                             raw_val.to_string(),
@@ -329,7 +329,7 @@ impl CommandParamTy {
                     EnumVal::Simple(cpt) => cpt.check_fully(param_name, iter, raw_cmd)?,
                     EnumVal::Complex(usage_builder) => {
                         for val in usage_builder.inner.req.iter() {
-                            val.ty.check_fully(&val.name, iter, raw_cmd)?;
+                            val.ty.check_fully(val.name, iter, raw_cmd)?;
                         }
                     }
                     EnumVal::None => {}
@@ -353,7 +353,7 @@ impl CommandParamTy {
     pub fn validate(&self, input: &str, param_name: &'static str) -> Result<(), ParamInvalidError> {
         match self {
             CommandParamTy::Int(constraints) => {
-                let num = input.parse::<isize>();
+                let num = input.parse::<SInt>();
                 match num {
                     Ok(num) => match constraints {
                         CmdParamNumConstraints::Range(range) => {
@@ -367,10 +367,10 @@ impl CommandParamTy {
                             }
                         }
                         CmdParamNumConstraints::Variants(variants) => {
-                            if !variants.iter().any(|variant| *variant == num) {
+                            if !variants.contains(&num) {
                                 Err(ParamInvalidError {
                                     name: param_name,
-                                    kind: ParamInvalidErrorKind::IntInvalidVariant(&variants, num),
+                                    kind: ParamInvalidErrorKind::IntInvalidVariant(variants, num),
                                 })
                             } else {
                                 Ok(())
@@ -385,7 +385,7 @@ impl CommandParamTy {
                 }
             }
             CommandParamTy::UInt(constraints) => {
-                let num = input.parse::<usize>();
+                let num = input.parse::<UInt>();
                 match num {
                     Ok(num) => match constraints {
                         CmdParamNumConstraints::Range(range) => {
@@ -399,10 +399,10 @@ impl CommandParamTy {
                             }
                         }
                         CmdParamNumConstraints::Variants(variants) => {
-                            if !variants.iter().any(|variant| *variant == num) {
+                            if !variants.contains(&num) {
                                 Err(ParamInvalidError {
                                     name: param_name,
-                                    kind: ParamInvalidErrorKind::UIntInvalidVariant(&variants, num),
+                                    kind: ParamInvalidErrorKind::UIntInvalidVariant(variants, num),
                                 })
                             } else {
                                 Ok(())
@@ -602,7 +602,7 @@ impl CommandParamTy {
                 CmdParamStrConstraints::Variants { variants, .. } => {
                     let mut str = String::new();
                     str.push_str("string");
-                    if variants.len() != 0 {
+                    if !variants.is_empty() {
                         str.push('(');
                         for variant in variants.iter() {
                             str.push_str(variant);
@@ -635,7 +635,7 @@ impl CommandParamTy {
                             finished.push('\"');
                         }
                     }
-                    finished.push_str("\n");
+                    finished.push('\n');
                 }
                 if !variants.values().is_empty() {
                     finished.push_str(" ".repeat(indents).as_str());
@@ -643,7 +643,7 @@ impl CommandParamTy {
                 finished
             }
             CommandParamTy::Unbound { minimum, param } => {
-                let mut finished = String::from(" ".repeat(indents));
+                let mut finished = " ".repeat(indents);
                 finished.push('[');
                 finished.push_str(minimum.to_string().as_str());
                 finished.push_str("...] "); // FIXME: is there a better visual representation?
@@ -676,7 +676,7 @@ impl Display for ParamInvalidError {
                 f.write_char(')')
             }
             ParamInvalidErrorKind::StringInvalidVariant(variants, val) => {
-                f.write_str(&val)?;
+                f.write_str(val)?;
                 f.write_str(" is not one of the valid variants (")?;
                 for (idx, variant) in variants.iter().enumerate() {
                     f.write_str(variant)?;
@@ -685,11 +685,11 @@ impl Display for ParamInvalidError {
                     }
                 }
                 f.write_str(") of parameter ")?;
-                f.write_str(&self.name)
+                f.write_str(self.name)
             }
             ParamInvalidErrorKind::EnumInvalidVariant(variants, val) => {
                 // TODO: improve this printing
-                f.write_str(&val)?;
+                f.write_str(val)?;
                 f.write_str(" is not one of the valid variants (")?;
                 for (idx, variant) in variants.iter().enumerate() {
                     f.write_str(variant.0)?;
@@ -698,12 +698,12 @@ impl Display for ParamInvalidError {
                     }
                 }
                 f.write_str(") of parameter ")?;
-                f.write_str(&self.name)
+                f.write_str(self.name)
             }
             ParamInvalidErrorKind::NoNum(input) => {
-                f.write_str(&input)?;
+                f.write_str(input)?;
                 f.write_str("is not a whole number, but the parameter ")?;
-                f.write_str(&self.name)?;
+                f.write_str(self.name)?;
                 f.write_str(" has to be a whole number")
             }
             ParamInvalidErrorKind::IntOOB(range, val) => {
@@ -727,7 +727,7 @@ impl Display for ParamInvalidError {
                     }
                 }
                 f.write_str(") of parameter ")?;
-                f.write_str(&self.name)
+                f.write_str(self.name)
             }
             ParamInvalidErrorKind::UIntOOB(range, val) => {
                 Display::fmt(&val, f)?;
@@ -750,12 +750,12 @@ impl Display for ParamInvalidError {
                     }
                 }
                 f.write_str(") of parameter ")?;
-                f.write_str(&self.name)
+                f.write_str(self.name)
             }
             ParamInvalidErrorKind::NoDecimal(input) => {
-                f.write_str(&input)?;
+                f.write_str(input)?;
                 f.write_str("is not a decimal number, but the parameter ")?;
-                f.write_str(&self.name)?;
+                f.write_str(self.name)?;
                 f.write_str(" has to be a decimal number")
             }
             ParamInvalidErrorKind::DecimalOOB(range, val) => {
@@ -770,17 +770,17 @@ impl Display for ParamInvalidError {
                 f.write_char(')')
             }
             ParamInvalidErrorKind::StringNotContaining(val, input) => {
-                f.write_str(&input)?;
+                f.write_str(input)?;
                 f.write_str(" does not contain ")?;
                 f.write_str(val)
             }
             ParamInvalidErrorKind::StringNotStarting(val, input) => {
-                f.write_str(&input)?;
+                f.write_str(input)?;
                 f.write_str(" does not start with ")?;
                 f.write_str(val)
             }
             ParamInvalidErrorKind::StringNotEnding(val, input) => {
-                f.write_str(&input)?;
+                f.write_str(input)?;
                 f.write_str(" does not end with ")?;
                 f.write_str(val)
             }
@@ -794,6 +794,9 @@ impl Debug for ParamInvalidError {
     }
 }
 
+type UInt = u128;
+type SInt = i128;
+
 pub enum ParamInvalidErrorKind {
     StringNotContaining(&'static str, String),
     StringNotStarting(&'static str, String),
@@ -802,10 +805,10 @@ pub enum ParamInvalidErrorKind {
     StringInvalidVariant(&'static [&'static str], String),
     EnumInvalidVariant(Vec<(&'static str, EnumVal)>, String),
     NoNum(String),
-    IntOOB(Range<isize>, isize),
-    IntInvalidVariant(&'static [isize], isize),
-    UIntOOB(Range<usize>, usize),
-    UIntInvalidVariant(&'static [usize], usize),
+    IntOOB(Range<SInt>, SInt),
+    IntInvalidVariant(&'static [SInt], SInt),
+    UIntOOB(Range<UInt>, UInt),
+    UIntInvalidVariant(&'static [UInt], UInt),
     NoDecimal(String),
     DecimalOOB(Range<f64>, f64),
 }
@@ -877,6 +880,12 @@ struct InnerBuilder {
 pub struct UsageBuilder<M = BuilderMutable> {
     inner: InnerBuilder,
     mutability: PhantomData<M>,
+}
+
+impl<'a> Default for UsageBuilder<BuilderMutable> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'a> UsageBuilder<BuilderMutable> {
