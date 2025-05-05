@@ -225,7 +225,7 @@ impl<CTX: Send + Sync> CLIBuilder<CTX> {
         self
     }
 
-    fn command_inner(&mut self, cmd: CommandBuilder<CTX>) -> Self {
+    fn command_inner(&mut self, cmd: CommandBuilder<CTX>) {
          // ensure the name and aliases are unique
          for cmd in self.cmds.iter().enumerate() {
             for other in self.cmds.iter().enumerate() {
