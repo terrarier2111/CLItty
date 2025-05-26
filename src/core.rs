@@ -682,10 +682,10 @@ impl Display for ParamInvalidError {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
                     f.write_str(" is too long for parameter (max len: ")?;
-                    range.end.fmt(f)?;
+                    Display::fmt(&range.end, f)?;
                 } else {
                     f.write_str(" is too short for parameter (min len: ")?;
-                    range.start.fmt(f)?;
+                    Display::fmt(&range.start, f)?;
                 }
                 f.write_char(')')
             }
@@ -724,10 +724,10 @@ impl Display for ParamInvalidError {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
                     f.write_str(" is too large for parameter (max: ")?;
-                    range.end.fmt(f)?;
+                    Display::fmt(&range.end, f)?;
                 } else {
                     f.write_str(" is too short for parameter (min len: ")?;
-                    range.start.fmt(f)?;
+                    Display::fmt(&range.start, f)?;
                 }
                 f.write_char(')')
             }
@@ -747,10 +747,10 @@ impl Display for ParamInvalidError {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
                     f.write_str(" is too large for parameter (max: ")?;
-                    range.end.fmt(f)?;
+                    Display::fmt(&range.end, f)?;
                 } else {
                     f.write_str(" is too short for parameter (min len: ")?;
-                    range.start.fmt(f)?;
+                    Display::fmt(&range.start, f)?;
                 }
                 f.write_char(')')
             }
@@ -776,10 +776,10 @@ impl Display for ParamInvalidError {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
                     f.write_str(" is too large for parameter (max: ")?;
-                    range.end.fmt(f)?;
+                    Display::fmt(&range.end, f)?;
                 } else {
                     f.write_str(" is too short for parameter (min len: ")?;
-                    range.start.fmt(f)?;
+                    Display::fmt(&range.start, f)?;
                 }
                 f.write_char(')')
             }
