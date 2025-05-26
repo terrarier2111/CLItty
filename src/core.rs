@@ -74,6 +74,13 @@ impl<C> CLICore<C> {
                     for req in params.required().iter() {
                         req.ty.check_fully(req.name, &mut iter, &raw_cmd)?;
                     }
+                    if iter.has_next() {
+                        for opt in params.optional().iter() {
+                            if iter.has_next() {
+                                opt.ty.check_fully(opt.name, &mut iter, &raw_cmd)?;
+                            }
+                        }
+                    }
                 }
                 match cmd.cmd_impl.execute(ctx, parts) {
                     Ok(_) => Ok(()),
@@ -330,6 +337,13 @@ impl CommandParamTy {
                     EnumVal::Complex(usage_builder) => {
                         for val in usage_builder.inner.req.iter() {
                             val.ty.check_fully(val.name, iter, raw_cmd)?;
+                        }
+                        if iter.has_next() {
+                            for val in usage_builder.inner.opt.iter() {
+                                if iter.has_next() {
+                                    val.ty.check_fully(name, iter, raw_cmd)?;
+                                }
+                            }
                         }
                     }
                     EnumVal::None => {}
@@ -668,10 +682,10 @@ impl Display for ParamInvalidError {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
                     f.write_str(" is too long for parameter (max len: ")?;
-                    Display::fmt(&range.end, f)?;
+                    range.end.fmt(f)?;
                 } else {
                     f.write_str(" is too short for parameter (min len: ")?;
-                    Display::fmt(&range.start, f)?;
+                    range.start.fmt(f)?;
                 }
                 f.write_char(')')
             }
@@ -710,10 +724,10 @@ impl Display for ParamInvalidError {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
                     f.write_str(" is too large for parameter (max: ")?;
-                    Display::fmt(&range.end, f)?;
+                    range.end.fmt(f)?;
                 } else {
                     f.write_str(" is too short for parameter (min len: ")?;
-                    Display::fmt(&range.start, f)?;
+                    range.start.fmt(f)?;
                 }
                 f.write_char(')')
             }
@@ -733,10 +747,10 @@ impl Display for ParamInvalidError {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
                     f.write_str(" is too large for parameter (max: ")?;
-                    Display::fmt(&range.end, f)?;
+                    range.end.fmt(f)?;
                 } else {
                     f.write_str(" is too short for parameter (min len: ")?;
-                    Display::fmt(&range.start, f)?;
+                    range.start.fmt(f)?;
                 }
                 f.write_char(')')
             }
@@ -762,10 +776,10 @@ impl Display for ParamInvalidError {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
                     f.write_str(" is too large for parameter (max: ")?;
-                    Display::fmt(&range.end, f)?;
+                    range.end.fmt(f)?;
                 } else {
                     f.write_str(" is too short for parameter (min len: ")?;
-                    Display::fmt(&range.start, f)?;
+                    range.start.fmt(f)?;
                 }
                 f.write_char(')')
             }
@@ -1106,6 +1120,12 @@ impl<T: Iterator> Iterator for PeekEnum<T> {
 }
 
 impl<T: Iterator + ExactSizeIterator> ExactSizeIterator for PeekEnum<T> {}
+
+impl<T: Iterator + ExactSizeIterator> PeekEnum<T> {
+    fn has_next(&self) -> bool {
+        self.size_hint().0 != 0
+    }
+}
 
 impl<T: Iterator + Clone> Clone for PeekEnum<T> {
     fn clone(&self) -> Self {
