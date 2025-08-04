@@ -9,6 +9,8 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use regex::Regex;
+
 pub struct CLICore<C> {
     cmds: Arc<HashMap<String, (bool, Rc<Command<C>>)>>,
     cmd_cnt: usize,
@@ -465,22 +467,6 @@ impl CommandParamTy {
                 }
             }
             CommandParamTy::String(constraints) => match constraints {
-                CmdParamStrConstraints::AllowedCharacters(allowed) => {
-                    for chr in input.chars() {
-                        if !allowed.contains(&chr) {
-                            return Err(ParamInvalidError { name: param_name, kind: ParamInvalidErrorKind::StringContainingIllegalCharWithAllowed(input.to_string(), chr, allowed) });
-                        }
-                    }
-                    Ok(())
-                }
-                CmdParamStrConstraints::ForbiddenCharacters(forbidden) => {
-                    for chr in input.chars() {
-                        if forbidden.contains(&chr) {
-                            return Err(ParamInvalidError { name: param_name, kind: ParamInvalidErrorKind::StringContainingIllegalCharWithForbidden(input.to_string(), chr, forbidden) });
-                        }
-                    }
-                    Ok(())
-                }
                 CmdParamStrConstraints::Length(range) => {
                     if range.start > input.len() || range.end < input.len() {
                         Err(ParamInvalidError {
@@ -523,7 +509,21 @@ impl CommandParamTy {
                         Err(ParamInvalidError {
                             name: param_name,
                             kind: ParamInvalidErrorKind::StringInvalidVariant(
-                                variants,
+                                variants.iter().map(|variant| variant.to_string()).collect::<Vec<_>>(),
+                                input.to_string(),
+                            ),
+                        })
+                    } else {
+                        Ok(())
+                    }
+                }
+                CmdParamStrConstraints::VariantsRegex(variants) => {
+                    let valid = variants.iter().any(|variant| variant.is_match(input));
+                    if !valid {
+                        Err(ParamInvalidError {
+                            name: param_name,
+                            kind: ParamInvalidErrorKind::StringInvalidVariant(
+                                variants.iter().map(|variant| variant.as_str().to_string()).collect::<Vec<_>>(),
                                 input.to_string(),
                             ),
                         })
@@ -634,36 +634,6 @@ impl CommandParamTy {
                 CmdParamDecimalConstraints::None => String::from("decimal"),
             },
             CommandParamTy::String(constraints) => match constraints {
-                CmdParamStrConstraints::AllowedCharacters(allowed) => {
-                     let mut str = String::new();
-                    str.push_str("allowed: ");
-                    if !allowed.is_empty() {
-                        str.push('[');
-                        for variant in allowed.iter() {
-                            str.push(*variant);
-                            str.push_str(", ");
-                        }
-                        str.pop();
-                        str.pop();
-                        str.push(']');
-                    }
-                    str
-                },
-                CmdParamStrConstraints::ForbiddenCharacters(forbidden) => {
-                     let mut str = String::new();
-                    str.push_str("forbidden: ");
-                    if !forbidden.is_empty() {
-                        str.push('[');
-                        for variant in forbidden.iter() {
-                            str.push(*variant);
-                            str.push_str(", ");
-                        }
-                        str.pop();
-                        str.pop();
-                        str.push(']');
-                    }
-                    str
-                },
                 CmdParamStrConstraints::Length(range) => {
                     format!("string(length {} to {})", range.start, range.end)
                 }
@@ -678,6 +648,21 @@ impl CommandParamTy {
                         str.push('(');
                         for variant in variants.iter() {
                             str.push_str(variant);
+                            str.push_str(", ");
+                        }
+                        str.pop();
+                        str.pop();
+                        str.push(')');
+                    }
+                    str
+                }
+                CmdParamStrConstraints::VariantsRegex(variants) => {
+                    let mut str = String::new();
+                    str.push_str("string regex");
+                    if !variants.is_empty() {
+                        str.push('(');
+                        for variant in variants.iter() {
+                            str.push_str(variant.as_str());
                             str.push_str(", ");
                         }
                         str.pop();
@@ -908,7 +893,7 @@ pub enum ParamInvalidErrorKind {
     StringContainingIllegalCharWithAllowed(String, char, &'static [char]),
     StringContainingIllegalCharWithForbidden(String, char, &'static [char]),
     StringInvalidLen(Range<usize>, usize),
-    StringInvalidVariant(&'static [&'static str], String),
+    StringInvalidVariant(Vec<String>, String),
     EnumInvalidVariant(Vec<(&'static str, EnumVal)>, String),
     NoNum(String),
     IntOOB(Range<SInt>, SInt),
@@ -946,12 +931,23 @@ pub enum CmdParamStrConstraints {
         variants: &'static [&'static str],
         ignore_case: bool,
     },
-    AllowedCharacters(&'static [char]),
-    ForbiddenCharacters(&'static [char]),
+    VariantsRegex(Vec<Regex>),
     Contains(&'static str),
     StartsWith(&'static str),
     EndsWith(&'static str),
     None,
+}
+
+impl CmdParamStrConstraints {
+
+    pub fn new_regex(variants: &[&str]) -> anyhow::Result<Self> {
+        let mut cache = vec![];
+        for variant in variants {
+            cache.push(Regex::new(*variant)?);
+        }
+        Ok(Self::VariantsRegex(cache))
+    }
+
 }
 
 #[derive(Clone)]
