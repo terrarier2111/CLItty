@@ -277,20 +277,8 @@ impl CommandParam {
     }
 }
 
-// type ConstraintList<T> = impl Into<&'static [T]>;
-
-// TODO: allow list of constraints instead of just a single one
 #[derive(Clone)]
 pub enum CommandParamTy {
-    /*Int(&'static [CmdParamNumConstraints<SInt>]),
-    UInt(&'static [CmdParamNumConstraints<UInt>]),
-    Decimal(&'static [CmdParamDecimalConstraints<f64>]),
-    String(&'static [CmdParamStrConstraints]),
-    Enum(&'static [CmdParamEnumConstraints]),
-    Unbound {
-        minimum: NonZeroUsize,
-        param: Box<CommandParamTy>,
-    },*/
     Int(CmdParamNumConstraints<SInt>),
     UInt(CmdParamNumConstraints<UInt>),
     Decimal(CmdParamDecimalConstraints<f64>),
