@@ -275,8 +275,20 @@ impl CommandParam {
     }
 }
 
+// type ConstraintList<T> = impl Into<&'static [T]>;
+
+// TODO: allow list of constraints instead of just a single one
 #[derive(Clone)]
 pub enum CommandParamTy {
+    /*Int(&'static [CmdParamNumConstraints<SInt>]),
+    UInt(&'static [CmdParamNumConstraints<UInt>]),
+    Decimal(&'static [CmdParamDecimalConstraints<f64>]),
+    String(&'static [CmdParamStrConstraints]),
+    Enum(&'static [CmdParamEnumConstraints]),
+    Unbound {
+        minimum: NonZeroUsize,
+        param: Box<CommandParamTy>,
+    },*/
     Int(CmdParamNumConstraints<SInt>),
     UInt(CmdParamNumConstraints<UInt>),
     Decimal(CmdParamDecimalConstraints<f64>),
@@ -453,6 +465,22 @@ impl CommandParamTy {
                 }
             }
             CommandParamTy::String(constraints) => match constraints {
+                CmdParamStrConstraints::AllowedCharacters(allowed) => {
+                    for chr in input.chars() {
+                        if !allowed.contains(&chr) {
+                            return Err(ParamInvalidError { name: param_name, kind: ParamInvalidErrorKind::StringContainingIllegalCharWithAllowed(input.to_string(), chr, allowed) });
+                        }
+                    }
+                    Ok(())
+                }
+                CmdParamStrConstraints::ForbiddenCharacters(forbidden) => {
+                    for chr in input.chars() {
+                        if forbidden.contains(&chr) {
+                            return Err(ParamInvalidError { name: param_name, kind: ParamInvalidErrorKind::StringContainingIllegalCharWithForbidden(input.to_string(), chr, forbidden) });
+                        }
+                    }
+                    Ok(())
+                }
                 CmdParamStrConstraints::Length(range) => {
                     if range.start > input.len() || range.end < input.len() {
                         Err(ParamInvalidError {
@@ -606,6 +634,36 @@ impl CommandParamTy {
                 CmdParamDecimalConstraints::None => String::from("decimal"),
             },
             CommandParamTy::String(constraints) => match constraints {
+                CmdParamStrConstraints::AllowedCharacters(allowed) => {
+                     let mut str = String::new();
+                    str.push_str("allowed: ");
+                    if !allowed.is_empty() {
+                        str.push('[');
+                        for variant in allowed.iter() {
+                            str.push(*variant);
+                            str.push_str(", ");
+                        }
+                        str.pop();
+                        str.pop();
+                        str.push(']');
+                    }
+                    str
+                },
+                CmdParamStrConstraints::ForbiddenCharacters(forbidden) => {
+                     let mut str = String::new();
+                    str.push_str("forbidden: ");
+                    if !forbidden.is_empty() {
+                        str.push('[');
+                        for variant in forbidden.iter() {
+                            str.push(*variant);
+                            str.push_str(", ");
+                        }
+                        str.pop();
+                        str.pop();
+                        str.push(']');
+                    }
+                    str
+                },
                 CmdParamStrConstraints::Length(range) => {
                     format!("string(length {} to {})", range.start, range.end)
                 }
@@ -678,6 +736,38 @@ impl Error for ParamInvalidError {}
 impl Display for ParamInvalidError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
+            ParamInvalidErrorKind::StringContainingIllegalCharWithAllowed(val, found, allowed) => {
+                Display::fmt(&val, f)?;
+                f.write_str(" contains the character \"")?;
+                f.write_char(*found)?;
+                f.write_str("\" which is not in the list of allowed characters: ")?;
+                let mut allowed = allowed.iter();
+                f.write_char('[')?;
+                if let Some(first) = allowed.next() {
+                    f.write_char(*first)?;
+                    for chr in allowed {
+                        f.write_str(", ")?;
+                        f.write_char(*chr)?;
+                    }
+                }
+                f.write_char(']')
+            }
+            ParamInvalidErrorKind::StringContainingIllegalCharWithForbidden(val, found, forbidden) => {
+                Display::fmt(&val, f)?;
+                f.write_str(" contains the character \"")?;
+                f.write_char(*found)?;
+                f.write_str("\" which is in the list of forbidden characters: ")?;
+                let mut forbidden = forbidden.iter();
+                f.write_char('[')?;
+                if let Some(first) = forbidden.next() {
+                    f.write_char(*first)?;
+                    for chr in forbidden {
+                        f.write_str(", ")?;
+                        f.write_char(*chr)?;
+                    }
+                }
+                f.write_char(']')
+            }
             ParamInvalidErrorKind::StringInvalidLen(range, val) => {
                 Display::fmt(&val, f)?;
                 if *val > range.end {
@@ -815,6 +905,8 @@ pub enum ParamInvalidErrorKind {
     StringNotContaining(&'static str, String),
     StringNotStarting(&'static str, String),
     StringNotEnding(&'static str, String),
+    StringContainingIllegalCharWithAllowed(String, char, &'static [char]),
+    StringContainingIllegalCharWithForbidden(String, char, &'static [char]),
     StringInvalidLen(Range<usize>, usize),
     StringInvalidVariant(&'static [&'static str], String),
     EnumInvalidVariant(Vec<(&'static str, EnumVal)>, String),
@@ -854,6 +946,8 @@ pub enum CmdParamStrConstraints {
         variants: &'static [&'static str],
         ignore_case: bool,
     },
+    AllowedCharacters(&'static [char]),
+    ForbiddenCharacters(&'static [char]),
     Contains(&'static str),
     StartsWith(&'static str),
     EndsWith(&'static str),
